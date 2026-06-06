@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f5bd8" />
+    <title>탄감자 자전거 챌린지</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="phone-frame" aria-label="탄감자 앱">
+        <div class="phone-top" aria-hidden="true">
+          <span></span>
+        </div>
+
+        <div class="app-screen">
+          <header class="top-bar">
+            <button class="icon-button back-button" type="button" aria-label="뒤로가기">‹</button>
+            <div>
+              <p class="brand">탄감자</p>
+              <h1 id="screenTitle">자전거 챌린지</h1>
+            </div>
+            <button class="icon-button" type="button" aria-label="알림">
+              <span class="bell-dot"></span>
+              ♧
+            </button>
+          </header>
+
+          <section class="screen-content" id="screenContent" tabindex="-1"></section>
+
+          <nav class="bottom-nav" aria-label="주요 메뉴">
+            <button class="nav-item active" type="button" data-tab="home">
+              <span>⌂</span>
+              홈
+            </button>
+            <button class="nav-item" type="button" data-tab="challenge">
+              <span>◎</span>
+              챌린지
+            </button>
+            <button class="nav-item" type="button" data-tab="map">
+              <span>⌖</span>
+              명소
+            </button>
+            <button class="nav-item" type="button" data-tab="points">
+              <span>P</span>
+              포인트
+            </button>
+            <button class="nav-item" type="button" data-tab="admin">
+              <span>✓</span>
+              검증
+            </button>
+          </nav>
+        </div>
+      </section>
+
+      <aside class="desktop-brief" aria-label="시스템 설계 요약">
+        <div class="brief-head">
+          <p class="brand">탄감자</p>
+          <h2>자전거 챌린지와 탄소포인트를 한 흐름으로</h2>
+          <p>
+            앱 사용자는 주행하고 명소를 인증하며 포인트를 쌓고, 운영자는 데이터 검증과
+            정산 승인을 처리합니다.
+          </p>
+        </div>
+
+        <div class="system-flow">
+          <article>
+            <span>1</span>
+            <strong>주행 기록</strong>
+            <p>거리, 시간, 평균 속도, 경로를 저장합니다.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <strong>CO2 산정</strong>
+            <p>자동차 대체 이동 기준으로 절감량을 계산합니다.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <strong>포인트 적립</strong>
+            <p>절감량과 챌린지 보너스를 탄소포인트로 환산합니다.</p>
+          </article>
+          <article>
+            <span>4</span>
+            <strong>관리자 승인</strong>
+            <p>QR, GPS, 이상 주행 여부를 검토한 뒤 정산합니다.</p>
+          </article>
+        </div>
+
+        <div class="policy-card">
+          <h3>기본 산정식</h3>
+          <p>
+            <strong>예상 CO2 절감량</strong> = 주행거리(km) × 0.192kgCO2e
+          </p>
+          <p>
+            <strong>탄소포인트</strong> = 절감량(kgCO2e) × 100P + 명소/배지 보너스
+          </p>
+        </div>
+      </aside>
+    </main>
+
+    <template id="homeTemplate">
+      <section class="hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow">이번 주 목표</p>
+          <h2><span data-weekly-distance>120</span> / 200km</h2>
+          <div class="progress-track" aria-label="주간 목표 진행률">
+            <span data-weekly-progress></span>
+          </div>
+          <p>라이딩을 시작하면 거리, 시간, CO2 절감량, 포인트가 자동 계산됩니다.</p>
+        </div>
+        <div class="route-illustration" aria-hidden="true">
+          <span class="hill hill-a"></span>
+          <span class="hill hill-b"></span>
+          <span class="road"></span>
+          <span class="pin pin-a"></span>
+          <span class="pin pin-b"></span>
+          <span class="bike-mark">자전거</span>
+        </div>
+      </section>
+
+      <section class="ride-panel">
+        <div class="ride-status">
+          <p class="eyebrow">현재 라이딩</p>
+          <h3 data-ride-state>대기 중</h3>
+          <dl>
+            <div>
+              <dt>거리</dt>
+              <dd><span data-ride-distance>0.00</span> km</dd>
+            </div>
+            <div>
+              <dt>시간</dt>
+              <dd data-ride-time>00:00</dd>
+            </div>
+            <div>
+              <dt>속도</dt>
+              <dd><span data-ride-speed>0.0</span> km/h</dd>
+            </div>
+          </dl>
+        </div>
+        <button class="primary-action" type="button" data-action="toggle-ride">라이딩 시작</button>
+        <button class="secondary-action" type="button" data-action="save-ride">기록 저장</button>
+      </section>
+
+      <section class="quick-grid" aria-label="핵심 기능">
+        <button class="quick-card" type="button" data-tab-target="map">
+          <span class="quick-icon green">⌖</span>
+          <strong>지도 기반 명소</strong>
+          <p>전북 100대 명소와 추천 코스를 확인합니다.</p>
+        </button>
+        <button class="quick-card" type="button" data-tab-target="points">
+          <span class="quick-icon blue">P</span>
+          <strong>탄소포인트</strong>
+          <p>절감한 CO2만큼 포인트를 적립합니다.</p>
+        </button>
+        <button class="quick-card" type="button" data-tab-target="challenge">
+          <span class="quick-icon gold">★</span>
+          <strong>배지 획득</strong>
+          <p>미션 달성으로 성장형, 미션형, 특별형 배지를 모읍니다.</p>
+        </button>
+      </section>
+    </template>
+
+    <template id="challengeTemplate">
+      <section class="section-head">
+        <p class="eyebrow">서비스 흐름</p>
+        <h2>출발부터 보상까지 한 번에</h2>
+      </section>
+      <ol class="timeline">
+        <li><strong>출발 설정</strong><span>출발지와 목적지, 추천 코스를 선택합니다.</span></li>
+        <li><strong>주행 시작</strong><span>선택한 경로를 따라 라이딩합니다.</span></li>
+        <li><strong>경로 기록</strong><span>거리, 시간, 속도, CO2 절감량이 자동 저장됩니다.</span></li>
+        <li><strong>명소 접근</strong><span>등록 명소 반경 100m에 들어오면 알림을 받습니다.</span></li>
+        <li><strong>QR 체크인</strong><span>현장 QR을 스캔해 방문을 인증합니다.</span></li>
+        <li><strong>배지 획득</strong><span>보물찾기와 챌린지 성과를 배지로 남깁니다.</span></li>
+        <li><strong>포인트 신청</strong><span>적립 포인트를 현금 또는 교통비로 전환 신청합니다.</span></li>
+        <li><strong>관리자 승인</strong><span>검증 후 정산이 완료됩니다.</span></li>
+      </ol>
+      <section class="badge-system">
+        <article>
+          <h3>성장형</h3>
+          <div class="badge-row" data-badge-group="growth"></div>
+        </article>
+        <article>
+          <h3>미션형</h3>
+          <div class="badge-row" data-badge-group="mission"></div>
+        </article>
+        <article>
+          <h3>특별형</h3>
+          <div class="badge-row" data-badge-group="special"></div>
+        </article>
+      </section>
+    </template>
+
+    <template id="mapTemplate">
+      <section class="section-head">
+        <p class="eyebrow">전북 100대 명소</p>
+        <h2>100m 이내에서 QR 인증</h2>
+      </section>
+      <div class="map-board" aria-label="명소 지도">
+        <span class="map-line"></span>
+        <button class="map-pin p1" type="button" data-landmark="0">고창 선운사</button>
+        <button class="map-pin p2" type="button" data-landmark="1">덕유산</button>
+        <button class="map-pin p3" type="button" data-landmark="2">전주 한옥마을</button>
+        <button class="map-pin p4" type="button" data-landmark="3">군산 근대역사거리</button>
+        <button class="map-pin p5" type="button" data-landmark="4">익산 미륵사지</button>
+        <button class="bike-position" type="button" data-action="move-near">현재 위치</button>
+      </div>
+      <section class="landmark-panel" data-landmark-panel></section>
+      <section class="checkin-panel">
+        <div>
+          <p class="eyebrow">현장성 확보</p>
+          <h3 data-checkin-status>명소를 선택해주세요</h3>
+          <p data-checkin-help>선택한 명소 반경 100m 이내에서 QR 체크인이 열립니다.</p>
+        </div>
+        <button class="primary-action" type="button" data-action="scan-qr" disabled>QR 스캔</button>
+      </section>
+    </template>
+
+    <template id="pointsTemplate">
+      <section class="points-hero">
+        <article>
+          <p>총 적립 포인트</p>
+          <strong><span data-total-points></span>P</strong>
+          <small>누적 적립 기준</small>
+        </article>
+        <article>
+          <p>예상 CO2 절감량</p>
+          <strong><span data-total-co2></span>kg</strong>
+          <small>나무 <span data-tree-effect></span>그루 식재 효과</small>
+        </article>
+      </section>
+      <section class="weekly-card">
+        <div>
+          <p class="eyebrow">이번 주 적립</p>
+          <h2><span data-weekly-points></span>P</h2>
+          <p data-weekly-copy></p>
+        </div>
+        <div class="bar-chart" data-weekly-bars></div>
+      </section>
+      <section class="exchange-card">
+        <div>
+          <p class="eyebrow">포인트 신청</p>
+          <h3>교통비 또는 지역상품권 전환</h3>
+          <p>신청 후 관리자가 주행 데이터와 QR 체크인을 검증합니다.</p>
+        </div>
+        <button class="primary-action" type="button" data-action="request-exchange">전환 신청</button>
+      </section>
+      <section>
+        <h3 class="list-title">이용내역</h3>
+        <div class="history-list" data-history-list></div>
+      </section>
+    </template>
+
+    <template id="adminTemplate">
+      <section class="section-head">
+        <p class="eyebrow">관리자 검증</p>
+        <h2>데이터 기반 승인 구조</h2>
+      </section>
+      <section class="admin-metrics">
+        <article><span data-admin-users></span><small>참여자</small></article>
+        <article><span data-admin-rides></span><small>주행 기록</small></article>
+        <article><span data-admin-pending></span><small>승인 대기</small></article>
+      </section>
+      <section class="admin-list" data-admin-list></section>
+    </template>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
