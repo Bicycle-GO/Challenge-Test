@@ -1,8 +1,9 @@
-const CACHE_NAME = "tangamja-bike-carbon-v1";
+const CACHE_NAME = "tangamja-bike-carbon-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
+  "./landmark-data.js",
   "./app.js",
   "./manifest.webmanifest",
   "./assets/icon.svg",
@@ -22,5 +23,19 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request)),
+  );
 });

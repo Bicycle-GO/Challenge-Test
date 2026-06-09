@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=official-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -139,8 +139,26 @@
             </div>
           </dl>
         </div>
+        <div class="gps-status-grid" aria-label="GPS 기록 상태">
+          <div>
+            <dt>GPS</dt>
+            <dd data-gps-status>대기 중</dd>
+          </div>
+          <div>
+            <dt>서버 샘플</dt>
+            <dd><span data-sample-count>0</span>개</dd>
+          </div>
+          <div>
+            <dt>화면 꺼짐</dt>
+            <dd data-wake-status>대기 중</dd>
+          </div>
+        </div>
+        <p class="ride-note">
+          라이딩 시작 후 위치 권한을 허용하면 GPS 좌표가 서버에 자동 저장됩니다.
+          웹앱은 화면이 완전히 꺼지면 기기 정책에 따라 백그라운드 GPS가 제한될 수 있습니다.
+        </p>
         <button class="primary-action" type="button" data-action="toggle-ride">라이딩 시작</button>
-        <button class="secondary-action" type="button" data-action="save-ride">기록 저장</button>
+        <button class="secondary-action" type="button" data-action="save-ride" disabled>라이딩 종료 및 서버 등록</button>
       </section>
 
       <section class="quick-grid" aria-label="핵심 기능">
@@ -191,6 +209,17 @@
           <div class="badge-row" data-badge-group="special"></div>
         </article>
       </section>
+      <section class="treasure-system" aria-label="보물 수집 시스템">
+        <div class="treasure-head">
+          <p class="eyebrow">보물 수집 설계</p>
+          <h2>지역, 장소, 명소를 잇는 탐험 컬렉션</h2>
+          <p>하나의 명소에서 단서를 얻고, 장소 유형을 완성하고, 지역 보물함을 여는 구조입니다.</p>
+        </div>
+        <div class="treasure-layers" data-treasure-layers></div>
+        <div class="region-collections" data-region-collections></div>
+        <div class="place-collections" data-place-collections></div>
+        <div class="landmark-treasures" data-landmark-treasures></div>
+      </section>
     </template>
 
     <template id="mapTemplate">
@@ -215,6 +244,15 @@
           <p data-checkin-help>선택한 명소 반경 100m 이내에서 QR 체크인이 열립니다.</p>
         </div>
         <button class="primary-action" type="button" data-action="scan-qr" disabled>QR 스캔</button>
+      </section>
+      <section class="official-directory">
+        <div class="directory-head">
+          <p class="eyebrow">공식 출처 기반</p>
+          <h3>전북 100대 명소</h3>
+          <p data-official-source-copy></p>
+        </div>
+        <div class="directory-stats" data-directory-stats></div>
+        <div class="official-landmark-list" data-official-landmarks></div>
       </section>
     </template>
 
@@ -265,6 +303,7 @@
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="app.js" type="module"></script>
+    <script src="landmark-data.js?v=official-1"></script>
+    <script src="app.js?v=official-1" type="module"></script>
   </body>
 </html>

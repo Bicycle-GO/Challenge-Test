@@ -1,16 +1,23 @@
 const STORAGE_KEY = "tangamja-bike-carbon-app";
 const CO2_PER_KM = 0.192;
-const POINTS_PER_CO2_KG = 100;
+const API_BASE = "/api";
+const RIDER_NAME = "테스트 라이더";
 
 const initialState = {
   tab: "home",
   selectedLandmark: 0,
   isNearLandmark: false,
   riding: false,
+  serverOnline: false,
+  gpsStatus: "대기 중",
+  wakeStatus: "대기 중",
+  activeRide: null,
+  liveRides: [],
   ride: {
     seconds: 0,
     distance: 0,
     speed: 0,
+    samples: 0,
   },
   stats: {
     users: 1250,
@@ -53,61 +60,174 @@ const initialState = {
   ],
 };
 
-const landmarks = [
-  {
-    name: "고창 선운사",
-    category: "역사·문화",
-    distance: 18.2,
-    bonus: 150,
-    near: 92,
-  },
-  {
-    name: "덕유산",
-    category: "자연",
-    distance: 24.7,
-    bonus: 180,
-    near: 64,
-  },
-  {
-    name: "전주 한옥마을",
-    category: "도심·관광",
-    distance: 12.45,
-    bonus: 150,
-    near: 78,
-  },
-  {
-    name: "군산 근대역사거리",
-    category: "역사·문화",
-    distance: 15.8,
-    bonus: 160,
-    near: 116,
-  },
-  {
-    name: "익산 미륵사지",
-    category: "역사·문화",
-    distance: 20.1,
-    bonus: 170,
-    near: 58,
-  },
-];
+const landmarks = Array.isArray(window.OFFICIAL_LANDMARKS) ? window.OFFICIAL_LANDMARKS : [];
 
 const badgeCatalog = {
   growth: [
-    { name: "첫 페달", icon: "P" },
-    { name: "탐험가", icon: "⌖" },
-    { name: "시즌 정복자", icon: "★" },
+    { name: "첫 페달", icon: "P", clue: "첫 주행 기록을 서버에 남긴 라이더" },
+    { name: "동네 개척자", icon: "⌖", clue: "생활권 명소 3곳을 연결한 라이더" },
+    { name: "시즌 정복자", icon: "★", clue: "시즌 목표 거리와 보물함을 모두 완성한 라이더" },
   ],
   mission: [
-    { name: "지역별 보물", icon: "□" },
-    { name: "장소별 보물", icon: "◇" },
-    { name: "명소 체크인", icon: "✓" },
+    { name: "지역별 보물", icon: "□", clue: "권역별 대표 단서를 모아 지역 보물함 개방" },
+    { name: "장소별 보물", icon: "◇", clue: "자연, 역사, 도심, 코스 유형별 컬렉션 완성" },
+    { name: "명소 체크인", icon: "✓", clue: "100m 진입과 현장 QR 인증을 모두 통과" },
   ],
   special: [
-    { name: "연속 참여", icon: "7" },
-    { name: "베스트 포토", icon: "▣" },
-    { name: "그린 라이더", icon: "♧" },
+    { name: "연속 참여", icon: "7", clue: "7일 연속 주행으로 열리는 꾸준함 배지" },
+    { name: "베스트 포토", icon: "▣", clue: "명소 스토리와 사진 미션을 함께 완성" },
+    { name: "그린 라이더", icon: "♧", clue: "친환경 누적 거리와 QR 미션을 동시에 달성" },
   ],
 };
+
+const treasureLayers = [
+  {
+    title: "명소 보물",
+    icon: "1",
+    copy: "한 명소 안에서 GPS 도착, QR 인증, 스토리 단서 3개를 모읍니다.",
+  },
+  {
+    title: "장소 보물",
+    icon: "2",
+    copy: "비슷한 장소 유형을 묶어 자연, 역사, 도심, 라이딩 코스 컬렉션을 완성합니다.",
+  },
+  {
+    title: "지역 보물",
+    icon: "3",
+    copy: "권역별 핵심 장소를 연결하면 지역 대표 보물함이 열립니다.",
+  },
+];
+
+const regionCollections = [
+  {
+    region: "전주권",
+    treasure: "한옥 시간 조각",
+    rarity: "희귀",
+    progress: 2,
+    total: 4,
+    places: ["전주 한옥마을", "경기전", "전동성당", "남부시장"],
+    rule: "역사·문화 2곳 + 도심 미션 1개 + 총 10km",
+    reward: "전주 시간 여행자",
+  },
+  {
+    region: "군산권",
+    treasure: "근대 항구 열쇠",
+    rarity: "영웅",
+    progress: 1,
+    total: 4,
+    places: ["군산 근대역사거리", "은파호수공원", "선유도", "초원사진관"],
+    rule: "근대거리 QR + 물길 코스 1개 + 사진 단서",
+    reward: "항구의 기록자",
+  },
+  {
+    region: "익산권",
+    treasure: "백제 왕도 인장",
+    rarity: "영웅",
+    progress: 1,
+    total: 3,
+    places: ["익산 미륵사지", "왕궁리 유적", "보석박물관"],
+    rule: "유적 2곳 체크인 + 스토리 퀴즈 정답",
+    reward: "왕도의 수호자",
+  },
+  {
+    region: "고창권",
+    treasure: "선운 숲 씨앗",
+    rarity: "희귀",
+    progress: 1,
+    total: 3,
+    places: ["고창 선운사", "고창읍성", "운곡람사르습지"],
+    rule: "자연 1곳 + 역사 1곳 + QR 2회",
+    reward: "초록 순례자",
+  },
+  {
+    region: "무주·진안권",
+    treasure: "산바람 나침반",
+    rarity: "전설",
+    progress: 0,
+    total: 3,
+    places: ["덕유산", "마이산", "태권도원"],
+    rule: "고도 상승 코스 + 산악 명소 2곳",
+    reward: "능선 개척자",
+  },
+];
+
+const placeCollections = [
+  {
+    type: "자연",
+    treasure: "초록 지형도",
+    icon: "산",
+    progress: 1,
+    total: 3,
+    logic: "산, 숲, 강·호수 중 서로 다른 지형 3개를 모으면 완성",
+  },
+  {
+    type: "역사·문화",
+    treasure: "시간의 지도",
+    icon: "史",
+    progress: 2,
+    total: 4,
+    logic: "사찰, 유적, 한옥, 근대건축 단서를 각각 1개씩 수집",
+  },
+  {
+    type: "도심·관광",
+    treasure: "도시 탐험 패스",
+    icon: "街",
+    progress: 1,
+    total: 3,
+    logic: "거리, 시장, 박물관 계열 명소를 연결해 완성",
+  },
+  {
+    type: "라이딩 코스",
+    treasure: "바람길 코어",
+    icon: "道",
+    progress: 0,
+    total: 3,
+    logic: "강변길, 해안길, 능선길 중 2개 이상을 GPS 주행으로 인증",
+  },
+];
+
+const landmarkTreasures = [
+  {
+    landmark: "고창 선운사",
+    region: "고창권",
+    pieces: ["100m 진입", "대웅전 QR", "동백숲 단서"],
+    mystery: "봄이 오기 전 붉은 숲이 먼저 답한다.",
+    reward: "선운 숲 씨앗",
+    complete: true,
+  },
+  {
+    landmark: "전주 한옥마을",
+    region: "전주권",
+    pieces: ["골목 진입", "한옥 QR", "처마 사진"],
+    mystery: "지붕의 곡선이 길을 알려준다.",
+    reward: "한옥 시간 조각",
+    complete: true,
+  },
+  {
+    landmark: "군산 근대역사거리",
+    region: "군산권",
+    pieces: ["근대거리 진입", "건축물 QR", "항구 기록"],
+    mystery: "오래된 창고의 번호가 열쇠가 된다.",
+    reward: "근대 항구 열쇠",
+    complete: false,
+  },
+  {
+    landmark: "익산 미륵사지",
+    region: "익산권",
+    pieces: ["탑터 진입", "석탑 QR", "백제 퀴즈"],
+    mystery: "돌의 층수가 숨긴 이름을 찾는다.",
+    reward: "백제 왕도 인장",
+    complete: false,
+  },
+  {
+    landmark: "덕유산",
+    region: "무주·진안권",
+    pieces: ["고도 기록", "탐방 QR", "능선 스탬프"],
+    mystery: "가장 높은 바람이 나침반을 돌린다.",
+    reward: "산바람 나침반",
+    complete: false,
+  },
+];
 
 const titles = {
   home: "자전거 챌린지",
@@ -117,8 +237,12 @@ const titles = {
   admin: "관리자 검증",
 };
 
-let state = loadState();
+let state = loadClientState();
 let rideTimer = null;
+let locationWatchId = null;
+let wakeLock = null;
+let sampleQueue = [];
+let sampleFlushTimer = null;
 
 const screen = document.querySelector("#screenContent");
 const title = document.querySelector("#screenTitle");
@@ -132,9 +256,21 @@ const templates = {
 };
 
 render();
+hydrateFromServer();
 registerServiceWorker();
+window.addEventListener("beforeunload", flushSamplesWithBeacon);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    flushSamplesWithBeacon();
+    return;
+  }
 
-function loadState() {
+  if (state.riding) {
+    requestWakeLock();
+  }
+});
+
+function loadClientState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     return saved ? mergeState(initialState, saved) : structuredClone(initialState);
@@ -149,14 +285,100 @@ function mergeState(base, saved) {
     ...saved,
     stats: { ...base.stats, ...saved.stats },
     ride: { ...base.ride, ...saved.ride },
+    activeRide: saved.activeRide || base.activeRide,
+    liveRides: saved.liveRides || base.liveRides,
     badges: { ...base.badges, ...saved.badges },
     history: saved.history || base.history,
     requests: saved.requests || base.requests,
   };
 }
 
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, riding: false }));
+function persistClientPrefs() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      tab: state.tab,
+      selectedLandmark: state.selectedLandmark,
+      isNearLandmark: state.isNearLandmark,
+      activeRide: state.activeRide,
+      ride: state.ride,
+    }),
+  );
+}
+
+async function hydrateFromServer() {
+  try {
+    const payload = await apiRequest("/state");
+    applyServerState(payload.state);
+    if (state.activeRide) {
+      startLocalRideLoop();
+      startLocationWatch();
+      requestWakeLock();
+      showToast("진행 중인 라이딩을 서버에서 복구했습니다.");
+      return;
+    }
+    showToast("서버 데이터와 연결되었습니다.");
+  } catch {
+    state.serverOnline = false;
+    render();
+    showToast("서버 API에 연결되지 않아 임시 화면으로 표시됩니다.");
+  }
+}
+
+function applyServerState(serverState, activeRide = null) {
+  state = mergeState(state, serverState);
+  state.serverOnline = true;
+  state.activeRide = activeRide || findActiveRide(state.liveRides);
+  state.riding = Boolean(state.activeRide);
+  if (state.activeRide) {
+    state.ride = rideFromSession(state.activeRide);
+  }
+  persistClientPrefs();
+  render();
+}
+
+function findActiveRide(liveRides) {
+  return (liveRides || []).find((ride) => ride.status === "active" && ride.user === RIDER_NAME) || null;
+}
+
+function rideFromSession(session) {
+  return {
+    seconds: Math.max(0, Math.round(session.seconds || 0)),
+    distance: Number(session.distance || 0),
+    speed: Number(session.speed || 0),
+    samples: Number(session.samples?.length || session.sampleCount || 0),
+  };
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : {};
+
+  if (!response.ok) {
+    throw new Error(payload.error || `API request failed: ${response.status}`);
+  }
+
+  return payload;
+}
+
+async function mutateServer(path, body, successMessage) {
+  try {
+    const payload = await apiRequest(path, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    });
+    applyServerState(payload.state, payload.activeRide);
+    showToast(payload.message || successMessage);
+    return payload;
+  } catch (error) {
+    showToast(error.message || "서버 처리 중 오류가 발생했습니다.");
+    return null;
+  }
 }
 
 function render() {
@@ -177,11 +399,15 @@ function render() {
 function renderHome() {
   screen.querySelector("[data-weekly-distance]").textContent = state.stats.weeklyDistance.toFixed(0);
   screen.querySelector("[data-weekly-progress]").style.width = `${Math.min((state.stats.weeklyDistance / 200) * 100, 100)}%`;
-  screen.querySelector("[data-ride-state]").textContent = state.riding ? "주행 중" : "대기 중";
+  screen.querySelector("[data-ride-state]").textContent = state.riding ? "GPS 기록 중" : "대기 중";
   screen.querySelector("[data-ride-distance]").textContent = state.ride.distance.toFixed(2);
   screen.querySelector("[data-ride-time]").textContent = formatTime(state.ride.seconds);
   screen.querySelector("[data-ride-speed]").textContent = state.ride.speed.toFixed(1);
-  screen.querySelector("[data-action='toggle-ride']").textContent = state.riding ? "라이딩 일시정지" : "라이딩 시작";
+  screen.querySelector("[data-action='toggle-ride']").textContent = state.riding ? "라이딩 종료" : "라이딩 시작";
+  screen.querySelector("[data-action='save-ride']").disabled = !state.riding;
+  screen.querySelector("[data-gps-status]").textContent = state.gpsStatus;
+  screen.querySelector("[data-wake-status]").textContent = state.wakeStatus;
+  screen.querySelector("[data-sample-count]").textContent = formatNumber(state.ride.samples || 0);
 
   screen.querySelectorAll("[data-tab-target]").forEach((button) => {
     button.addEventListener("click", () => setTab(button.dataset.tabTarget));
@@ -196,27 +422,223 @@ function renderChallenge() {
         const earned = state.badges[group].includes(badge.name);
         const element = document.createElement("div");
         element.className = `badge-token ${earned ? "earned" : ""}`;
-        element.innerHTML = `<span>${badge.icon}</span>${badge.name}`;
+        element.innerHTML = `<span>${badge.icon}</span><strong>${badge.name}</strong><small>${badge.clue}</small>`;
         return element;
       }),
     );
   });
+
+  renderTreasureLayers();
+  renderRegionCollections();
+  renderPlaceCollections();
+  renderLandmarkTreasures();
+}
+
+function renderTreasureLayers() {
+  const target = screen.querySelector("[data-treasure-layers]");
+  if (!target) return;
+
+  target.replaceChildren(
+    ...treasureLayers.map((layer) => {
+      const element = document.createElement("article");
+      element.className = "treasure-layer-card";
+      element.innerHTML = `
+        <span>${layer.icon}</span>
+        <div>
+          <strong>${layer.title}</strong>
+          <p>${layer.copy}</p>
+        </div>
+      `;
+      return element;
+    }),
+  );
+}
+
+function renderRegionCollections() {
+  const target = screen.querySelector("[data-region-collections]");
+  if (!target) return;
+
+  target.replaceChildren(
+    sectionLabel("지역별 보물함", "권역마다 대표 테마와 완성 조건을 다르게 설계합니다."),
+    ...regionCollections.map((collection) => {
+      const percent = Math.round((collection.progress / collection.total) * 100);
+      const element = document.createElement("article");
+      element.className = "collection-card region-card";
+      element.innerHTML = `
+        <div class="collection-top">
+          <div>
+            <p class="eyebrow">${collection.region}</p>
+            <h3>${collection.treasure}</h3>
+          </div>
+          <span class="rarity rarity-${rarityClass(collection.rarity)}">${collection.rarity}</span>
+        </div>
+        <div class="collection-progress" aria-label="${collection.region} 진행률">
+          <span style="width:${percent}%"></span>
+        </div>
+        <p class="collection-rule">${collection.rule}</p>
+        <div class="place-chip-row">
+          ${collection.places.map((place, index) => `<span class="${index < collection.progress ? "unlocked" : ""}">${place}</span>`).join("")}
+        </div>
+        <strong class="reward-copy">완성 보상: ${collection.reward}</strong>
+      `;
+      return element;
+    }),
+  );
+}
+
+function renderPlaceCollections() {
+  const target = screen.querySelector("[data-place-collections]");
+  if (!target) return;
+
+  target.replaceChildren(
+    sectionLabel("장소 유형 보물", "사용자가 취향에 맞춰 자연, 역사, 도심, 코스 중 하나를 파고들 수 있게 합니다."),
+    ...placeCollections.map((collection) => {
+      const percent = Math.round((collection.progress / collection.total) * 100);
+      const element = document.createElement("article");
+      element.className = "collection-card place-card";
+      element.innerHTML = `
+        <span class="place-symbol">${collection.icon}</span>
+        <div>
+          <p class="eyebrow">${collection.type}</p>
+          <h3>${collection.treasure}</h3>
+          <p>${collection.logic}</p>
+          <div class="collection-progress" aria-label="${collection.type} 진행률">
+            <span style="width:${percent}%"></span>
+          </div>
+          <small>${collection.progress} / ${collection.total} 조각 수집</small>
+        </div>
+      `;
+      return element;
+    }),
+  );
+}
+
+function renderLandmarkTreasures() {
+  const target = screen.querySelector("[data-landmark-treasures]");
+  if (!target) return;
+
+  target.replaceChildren(
+    sectionLabel("명소별 보물 조각", "각 명소는 도착, QR, 스토리 단서가 모두 모여야 완성됩니다."),
+    ...landmarkTreasures.map((treasure) => {
+      const hasHistory = state.history.some((item) => item.title.includes(treasure.landmark));
+      const complete = treasure.complete || hasHistory;
+      const element = document.createElement("article");
+      element.className = `landmark-treasure ${complete ? "complete" : ""}`;
+      element.innerHTML = `
+        <div class="treasure-stamp">${complete ? "획득" : "잠김"}</div>
+        <div>
+          <p class="eyebrow">${treasure.region}</p>
+          <h3>${treasure.landmark}</h3>
+          <p class="mystery">힌트: ${treasure.mystery}</p>
+          <div class="piece-row">
+            ${treasure.pieces.map((piece, index) => `<span class="${complete || index === 0 ? "unlocked" : ""}">${piece}</span>`).join("")}
+          </div>
+          <strong>${treasure.reward}</strong>
+        </div>
+      `;
+      return element;
+    }),
+  );
+}
+
+function sectionLabel(title, copy) {
+  const element = document.createElement("div");
+  element.className = "treasure-section-label";
+  element.innerHTML = `<h3>${title}</h3><p>${copy}</p>`;
+  return element;
+}
+
+function rarityClass(rarity) {
+  return {
+    희귀: "rare",
+    영웅: "hero",
+    전설: "legend",
+  }[rarity] || "rare";
+}
+
+function renderOfficialDirectory() {
+  const list = screen.querySelector("[data-official-landmarks]");
+  const stats = screen.querySelector("[data-directory-stats]");
+  const sourceCopy = screen.querySelector("[data-official-source-copy]");
+  if (!list || !stats || !sourceCopy) return;
+
+  const cityCounts = countBy(landmarks.map((landmark) => landmark.city));
+  const categoryCounts = countBy(landmarks.map((landmark) => landmark.category));
+  const ktoCount = landmarks.filter((landmark) => landmark.sourceLevel === "kto100").length;
+  const topCategories = Object.entries(categoryCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => `${name} ${count}`)
+    .join(" · ");
+
+  sourceCopy.textContent = `문체부·한국관광공사 한국관광 100선 포함 ${ktoCount}곳을 우선 배치하고, 투어전북 관광지정보에서 14개 시군을 균형 있게 보강했습니다.`;
+  stats.replaceChildren(
+    directoryStat("전체", `${landmarks.length}곳`),
+    directoryStat("시군", `${Object.keys(cityCounts).length}개`),
+    directoryStat("대표 유형", topCategories),
+  );
+
+  list.replaceChildren(
+    ...landmarks.map((landmark) => {
+      const element = document.createElement("article");
+      element.className = `official-landmark-card ${landmark.sourceLevel === "kto100" ? "priority" : ""}`;
+      element.innerHTML = `
+        <span>${landmark.rank}</span>
+        <div>
+          <strong>${landmark.name}</strong>
+          <small>${landmark.city} · ${landmark.category}</small>
+        </div>
+        <em>${landmark.sourceLevel === "kto100" ? "한국관광100선" : "투어전북"}</em>
+      `;
+      return element;
+    }),
+  );
+}
+
+function directoryStat(label, value) {
+  const element = document.createElement("article");
+  element.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+  return element;
+}
+
+function countBy(items) {
+  return items.reduce((counts, item) => {
+    counts[item] = (counts[item] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function formatLandmarkPinName(name) {
+  return name
+    .replace("국립공원", "")
+    .replace("도립공원", "")
+    .replace("군립공원", "")
+    .replace("전주", "전주 ")
+    .trim();
 }
 
 function renderMap() {
-  const selected = landmarks[state.selectedLandmark];
+  const selected = landmarks[state.selectedLandmark] || landmarks[0];
+  if (!selected) return;
+
   screen.querySelectorAll("[data-landmark]").forEach((button) => {
-    button.classList.toggle("active", Number(button.dataset.landmark) === state.selectedLandmark);
+    const landmark = landmarks[Number(button.dataset.landmark)];
+    if (landmark) {
+      button.textContent = formatLandmarkPinName(landmark.name);
+    }
+    button.classList.toggle("active", landmark?.id === selected.id);
   });
 
   const panel = screen.querySelector("[data-landmark-panel]");
   panel.innerHTML = `
-    <p class="eyebrow">${selected.category}</p>
+    <p class="eyebrow">${selected.city} · ${selected.category}</p>
     <h3>${selected.name}</h3>
     <p>추천 코스로 ${selected.distance.toFixed(1)}km를 주행하면 약 ${(selected.distance * CO2_PER_KM).toFixed(2)}kgCO2e를 절감합니다.</p>
+    <p class="source-copy">공식 출처: ${selected.officialSource}</p>
     <div class="landmark-meta">
-      <span>예상 거리 ${selected.distance.toFixed(1)}km</span>
-      <span>반경 ${selected.near}m</span>
+      <span>${selected.id}</span>
+      <span>${selected.distance.toFixed(1)}km</span>
+      <span>QR 반경 ${selected.near}m</span>
       <span>보너스 ${selected.bonus}P</span>
     </div>
   `;
@@ -236,10 +658,12 @@ function renderMap() {
     button.addEventListener("click", () => {
       state.selectedLandmark = Number(button.dataset.landmark);
       state.isNearLandmark = false;
-      persist();
+      persistClientPrefs();
       render();
     });
   });
+
+  renderOfficialDirectory();
 }
 
 function renderPoints() {
@@ -322,13 +746,13 @@ document.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action === "save-ride") {
-    saveRide();
+    finishRide();
     return;
   }
 
   if (target.dataset.action === "move-near") {
     state.isNearLandmark = true;
-    persist();
+    persistClientPrefs();
     render();
     showToast("명소 반경 100m 이내로 접근했습니다.");
     return;
@@ -356,149 +780,205 @@ document.addEventListener("click", (event) => {
 
 function setTab(tab) {
   state.tab = tab;
-  persist();
+  persistClientPrefs();
   render();
   screen.focus({ preventScroll: true });
 }
 
-function toggleRide() {
-  state.riding = !state.riding;
+async function toggleRide() {
   if (state.riding) {
-    rideTimer = window.setInterval(tickRide, 1000);
-    showToast("라이딩 기록을 시작했습니다.");
-  } else {
-    window.clearInterval(rideTimer);
-    rideTimer = null;
-    showToast("라이딩을 일시정지했습니다.");
+    await finishRide();
+    return;
   }
+
+  const payload = await mutateServer("/rides/start", { user: RIDER_NAME }, "서버에 라이딩 세션을 시작했습니다.");
+  if (!payload?.activeRide) return;
+
+  state.activeRide = payload.activeRide;
+  state.ride = rideFromSession(payload.activeRide);
+  state.riding = true;
+  state.gpsStatus = "GPS 권한 요청 중";
+  persistClientPrefs();
   render();
+  startLocalRideLoop();
+  startLocationWatch();
+  requestWakeLock();
+}
+
+function startLocalRideLoop() {
+  window.clearInterval(rideTimer);
+  rideTimer = window.setInterval(tickRide, 1000);
 }
 
 function tickRide() {
-  state.ride.seconds += 1;
-  state.ride.speed = 18 + Math.sin(state.ride.seconds / 6) * 2.7;
-  state.ride.distance += state.ride.speed / 3600;
+  if (!state.activeRide?.startedAt) return;
+  state.ride.seconds = Math.max(0, Math.round((Date.now() - new Date(state.activeRide.startedAt).getTime()) / 1000));
+  persistClientPrefs();
   renderHome();
 }
 
-function saveRide() {
-  if (state.ride.distance < 0.05) {
-    showToast("테스트를 위해 최소 0.05km 이상 기록해주세요.");
+function startLocationWatch() {
+  if (!("geolocation" in navigator)) {
+    state.gpsStatus = "GPS 미지원";
+    render();
+    showToast("이 브라우저는 위치 기록을 지원하지 않습니다.");
     return;
   }
 
-  const distance = state.ride.distance;
-  const co2 = distance * CO2_PER_KM;
-  const points = Math.round(co2 * POINTS_PER_CO2_KG);
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId);
+  }
 
-  state.stats.totalCo2 += co2;
-  state.stats.totalPoints += points;
-  state.stats.weeklyDistance += distance;
-  state.stats.weeklyPoints[6] += points;
-  state.stats.rides += 1;
-  state.history.unshift({
-    title: "자전거 주행 기록",
-    meta: `${distance.toFixed(2)}km · ${co2.toFixed(2)}kgCO2e 절감`,
-    points,
-    type: "earn",
+  locationWatchId = navigator.geolocation.watchPosition(handlePosition, handlePositionError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 12000,
   });
-  state.requests.unshift({
-    id: `REQ-${Date.now()}`,
-    title: "주행 기록 검증",
-    user: "테스트 라이더",
-    distance,
-    co2,
-    points,
-    status: "pending",
-    evidence: `GPS 경로 저장, 평균속도 ${state.ride.speed.toFixed(1)}km/h, 시간 ${formatTime(state.ride.seconds)}`,
-  });
-  state.ride = { seconds: 0, distance: 0, speed: 0 };
-  state.riding = false;
+  state.gpsStatus = "GPS 수신 대기";
+  render();
+}
+
+function handlePosition(position) {
+  const sample = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    altitude: position.coords.altitude,
+    heading: position.coords.heading,
+    speed: position.coords.speed,
+    timestamp: new Date(position.timestamp).toISOString(),
+  };
+
+  state.gpsStatus = sample.accuracy ? `GPS 수신 중 ±${Math.round(sample.accuracy)}m` : "GPS 수신 중";
+  sampleQueue.push(sample);
+  flushSamples();
+}
+
+function handlePositionError(error) {
+  const messages = {
+    1: "위치 권한이 거부되었습니다.",
+    2: "현재 위치를 확인할 수 없습니다.",
+    3: "GPS 응답 시간이 초과되었습니다.",
+  };
+  state.gpsStatus = messages[error.code] || "GPS 오류";
+  render();
+  showToast(state.gpsStatus);
+}
+
+async function flushSamples() {
+  if (!state.activeRide?.id || !sampleQueue.length) return;
+  const samples = sampleQueue.splice(0, sampleQueue.length);
+
+  try {
+    const payload = await apiRequest(`/rides/${encodeURIComponent(state.activeRide.id)}/samples`, {
+      method: "POST",
+      body: JSON.stringify({ samples }),
+    });
+    applyServerState(payload.state, payload.activeRide);
+  } catch (error) {
+    sampleQueue = samples.concat(sampleQueue).slice(-40);
+    window.clearTimeout(sampleFlushTimer);
+    sampleFlushTimer = window.setTimeout(flushSamples, 5000);
+  }
+}
+
+function flushSamplesWithBeacon() {
+  if (!state.activeRide?.id || !sampleQueue.length || !navigator.sendBeacon) return;
+  const samples = sampleQueue.splice(0, sampleQueue.length);
+  const blob = new Blob([JSON.stringify({ samples })], { type: "application/json" });
+  navigator.sendBeacon(`${API_BASE}/rides/${encodeURIComponent(state.activeRide.id)}/samples`, blob);
+}
+
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator)) {
+    state.wakeStatus = "화면 꺼짐 방지 미지원";
+    render();
+    return;
+  }
+
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    state.wakeStatus = "화면 꺼짐 방지 활성";
+    wakeLock.addEventListener("release", () => {
+      state.wakeStatus = state.riding ? "화면 꺼짐 방지 해제됨" : "대기 중";
+      render();
+    });
+    render();
+  } catch {
+    state.wakeStatus = "화면 꺼짐 방지 실패";
+    render();
+  }
+}
+
+function stopLocalTracking() {
   window.clearInterval(rideTimer);
   rideTimer = null;
-  persist();
-  render();
-  showToast(`${points}P가 적립되고 관리자 검증 대기열에 등록됐습니다.`);
-}
+  window.clearTimeout(sampleFlushTimer);
+  sampleFlushTimer = null;
 
-function scanQr() {
-  const selected = landmarks[state.selectedLandmark];
-  const alreadyChecked = state.history.some((item) => item.title.includes(selected.name));
-  const bonus = alreadyChecked ? Math.round(selected.bonus / 3) : selected.bonus;
-
-  state.stats.totalPoints += bonus;
-  state.stats.weeklyPoints[6] += bonus;
-  state.history.unshift({
-    title: `${selected.name} QR 체크인`,
-    meta: `반경 ${selected.near}m 현장 인증`,
-    points: bonus,
-    type: "earn",
-  });
-
-  if (!state.badges.mission.includes("명소 체크인")) {
-    state.badges.mission.push("명소 체크인");
-  }
-  if (state.history.filter((item) => item.title.includes("QR 체크인")).length >= 3 && !state.badges.special.includes("그린 라이더")) {
-    state.badges.special.push("그린 라이더");
+  if (locationWatchId !== null && "geolocation" in navigator) {
+    navigator.geolocation.clearWatch(locationWatchId);
+    locationWatchId = null;
   }
 
-  state.requests.unshift({
-    id: `REQ-${Date.now()}`,
-    title: `${selected.name} QR 인증`,
-    user: "테스트 라이더",
-    distance: selected.distance,
-    co2: selected.distance * CO2_PER_KM,
-    points: bonus,
-    status: "pending",
-    evidence: `GPS 반경 ${selected.near}m, QR 스캔 성공, 중복 여부 자동 확인`,
-  });
-  state.isNearLandmark = false;
-  persist();
-  setTab("points");
-  showToast("QR 체크인이 완료됐습니다. 보너스 포인트가 적립됐습니다.");
+  if (wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
 }
 
-function requestExchange() {
-  const amount = Math.min(5000, Math.floor(state.stats.totalPoints / 100) * 100);
-  if (amount <= 0) {
-    showToast("신청 가능한 포인트가 없습니다.");
+async function finishRide() {
+  if (!state.activeRide?.id) {
+    showToast("진행 중인 라이딩이 없습니다.");
     return;
   }
 
-  state.requests.unshift({
-    id: `REQ-${Date.now()}`,
-    title: "포인트 전환 신청",
-    user: "테스트 라이더",
-    distance: state.stats.weeklyDistance,
-    co2: state.stats.totalCo2,
-    points: amount,
-    status: "pending",
-    evidence: "누적 포인트, QR 체크인, 주행 기록 교차 검증 필요",
-  });
-  state.history.unshift({
-    title: "포인트 전환 신청",
-    meta: "관리자 승인 대기",
-    points: amount,
-    type: "spend",
-  });
-  persist();
-  render();
-  showToast("포인트 전환 신청이 관리자 검증으로 넘어갔습니다.");
+  await flushSamples();
+  try {
+    const payload = await apiRequest(`/rides/${encodeURIComponent(state.activeRide.id)}/finish`, {
+      method: "POST",
+      body: JSON.stringify({ user: RIDER_NAME }),
+    });
+    stopLocalTracking();
+    state.activeRide = null;
+    state.riding = false;
+    state.ride = { seconds: 0, distance: 0, speed: 0, samples: 0 };
+    state.gpsStatus = "대기 중";
+    state.wakeStatus = "대기 중";
+    applyServerState(payload.state);
+    showToast(payload.message || "라이딩 기록이 서버에 최종 등록됐습니다.");
+  } catch (error) {
+    showToast(error.message || "라이딩 종료 처리 중 오류가 발생했습니다.");
+  }
 }
 
-function reviewRequest(id, status) {
-  const request = state.requests.find((item) => item.id === id);
-  if (!request) return;
-  request.status = status;
-  state.history.unshift({
-    title: status === "approved" ? "관리자 승인 완료" : "관리자 반려",
-    meta: `${request.title} · ${request.points}P`,
-    points: request.points,
-    type: status === "approved" ? "earn" : "spend",
-  });
-  persist();
-  render();
-  showToast(status === "approved" ? "검증을 승인했습니다." : "검증 요청을 반려했습니다.");
+async function scanQr() {
+  const payload = await mutateServer(
+    "/checkins",
+    { landmarkIndex: state.selectedLandmark, user: RIDER_NAME },
+    "QR 체크인이 서버에 저장됐습니다.",
+  );
+
+  if (!payload) return;
+  state.isNearLandmark = false;
+  setTab("points");
+}
+
+async function requestExchange() {
+  await mutateServer("/exchanges", { user: RIDER_NAME }, "포인트 전환 신청이 서버에 등록됐습니다.");
+}
+
+async function reviewRequest(id, status) {
+  try {
+    const payload = await apiRequest(`/requests/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    applyServerState(payload.state);
+    showToast(payload.message || (status === "approved" ? "검증을 승인했습니다." : "검증 요청을 반려했습니다."));
+  } catch (error) {
+    showToast(error.message || "검증 처리 중 오류가 발생했습니다.");
+  }
 }
 
 function formatTime(seconds) {
