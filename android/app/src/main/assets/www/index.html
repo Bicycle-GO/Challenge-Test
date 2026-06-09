@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=web-1" />
+    <link rel="stylesheet" href="styles.css?v=vworld-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -272,7 +272,8 @@
         <p class="eyebrow">전북 100대 명소</p>
         <h2>100m 이내에서 QR 인증</h2>
       </section>
-      <div class="map-board" aria-label="명소 지도">
+      <div class="map-board" aria-label="V-WORLD 기반 전북 명소 지도" data-vworld-map>
+        <div class="vworld-tile-layer" data-vworld-tiles aria-hidden="true"></div>
         <span class="map-line"></span>
         <button class="map-pin p1" type="button" data-landmark="0">고창 선운사</button>
         <button class="map-pin p2" type="button" data-landmark="1">덕유산</button>
@@ -280,6 +281,7 @@
         <button class="map-pin p4" type="button" data-landmark="3">군산 근대역사거리</button>
         <button class="map-pin p5" type="button" data-landmark="4">익산 미륵사지</button>
         <button class="bike-position" type="button" data-action="move-near">현재 위치</button>
+        <span class="vworld-attribution">V-WORLD</span>
       </div>
       <section class="landmark-panel" data-landmark-panel></section>
       <section class="checkin-panel">
@@ -348,7 +350,7 @@
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="landmark-data.js?v=web-1"></script>
-    <script src="app.js?v=web-1" type="module"></script>
+    <script src="landmark-data.js?v=vworld-1"></script>
+    <script src="app.js?v=vworld-1" type="module"></script>
   </body>
 </html>

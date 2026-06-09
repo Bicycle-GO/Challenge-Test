@@ -849,37 +849,62 @@ dd {
   overflow: hidden;
   border: 1px solid #c8e2cc;
   border-radius: var(--radius);
-  background:
-    linear-gradient(150deg, rgba(81, 178, 87, 0.18), transparent 28%),
-    linear-gradient(25deg, transparent 0 28%, rgba(72, 164, 222, 0.18) 29% 33%, transparent 34%),
-    linear-gradient(180deg, #eefbeb, #daf2d7);
+  background: #dce8ee;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.66);
 }
 
-.map-board::before,
+.map-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(10, 55, 135, 0.14)),
+    radial-gradient(circle at 18% 72%, rgba(40, 144, 67, 0.18), transparent 30%);
+  pointer-events: none;
+}
+
 .map-board::after {
   content: "";
   position: absolute;
-  border-radius: 50%;
-  background: rgba(70, 160, 80, 0.36);
+  inset: 10px;
+  z-index: 1;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 6px;
+  pointer-events: none;
 }
 
-.map-board::before {
-  width: 190px;
-  height: 96px;
-  left: -34px;
-  bottom: 16px;
+.vworld-tile-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
 }
 
-.map-board::after {
-  width: 240px;
-  height: 130px;
-  right: -50px;
-  top: 24px;
+.vworld-tile-layer img {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  max-width: none;
+  user-select: none;
+}
+
+.vworld-attribution {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  padding: 4px 7px;
+  border-radius: 99px;
+  color: #083d9b;
+  background: rgba(255, 255, 255, 0.86);
+  font-size: 0.64rem;
+  font-weight: 950;
 }
 
 .map-line {
   position: absolute;
+  z-index: 2;
   left: 45px;
   top: 132px;
   width: 276px;
@@ -888,13 +913,14 @@ dd {
   border-right: 7px solid var(--blue);
   border-radius: 0 48px 0 0;
   rotate: -13deg;
-  opacity: 0.92;
+  opacity: 0.78;
+  filter: drop-shadow(0 2px 4px rgba(7, 28, 88, 0.25));
 }
 
 .map-pin,
 .bike-position {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   min-height: 30px;
   max-width: 128px;
   padding: 7px 10px;

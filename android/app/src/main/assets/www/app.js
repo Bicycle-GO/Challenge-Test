@@ -2,6 +2,13 @@ const STORAGE_KEY = "tangamja-bike-carbon-app";
 const CO2_PER_KM = 0.192;
 const API_BASE = "/api";
 const RIDER_NAME = "테스트 라이더";
+const VWORLD_API_KEY = "E958994F-358D-38D8-8F2C-9C44597086CF";
+const VWORLD_MAP = {
+  center: { lat: 35.72, lng: 127.14 },
+  layer: "Base",
+  tileSize: 256,
+  zoom: 8,
+};
 
 const initialState = {
   tab: "home",
@@ -661,9 +668,61 @@ function formatLandmarkPinName(name) {
     .trim();
 }
 
+function renderVworldMap() {
+  const board = screen.querySelector("[data-vworld-map]");
+  const layer = screen.querySelector("[data-vworld-tiles]");
+  if (!board || !layer) return;
+
+  const width = board.clientWidth || 360;
+  const height = board.clientHeight || 280;
+  const tileSize = VWORLD_MAP.tileSize;
+  const zoom = VWORLD_MAP.zoom;
+  const center = lonLatToWorldPixel(VWORLD_MAP.center.lng, VWORLD_MAP.center.lat, zoom, tileSize);
+  const centerTileX = Math.floor(center.x / tileSize);
+  const centerTileY = Math.floor(center.y / tileSize);
+  const offsetX = width / 2 - (center.x - centerTileX * tileSize);
+  const offsetY = height / 2 - (center.y - centerTileY * tileSize);
+  const halfTilesX = Math.ceil(width / tileSize / 2) + 1;
+  const halfTilesY = Math.ceil(height / tileSize / 2) + 1;
+  const tiles = [];
+
+  for (let x = centerTileX - halfTilesX; x <= centerTileX + halfTilesX; x += 1) {
+    for (let y = centerTileY - halfTilesY; y <= centerTileY + halfTilesY; y += 1) {
+      if (y < 0 || y >= 2 ** zoom) continue;
+      const image = document.createElement("img");
+      image.alt = "";
+      image.decoding = "async";
+      image.loading = "lazy";
+      image.src = vworldTileUrl(x, y, zoom);
+      image.style.left = `${Math.round(offsetX + (x - centerTileX) * tileSize)}px`;
+      image.style.top = `${Math.round(offsetY + (y - centerTileY) * tileSize)}px`;
+      tiles.push(image);
+    }
+  }
+
+  layer.replaceChildren(...tiles);
+}
+
+function lonLatToWorldPixel(lng, lat, zoom, tileSize) {
+  const sinLat = Math.sin((Math.max(Math.min(lat, 85.05112878), -85.05112878) * Math.PI) / 180);
+  const scale = tileSize * 2 ** zoom;
+  return {
+    x: ((lng + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
+  };
+}
+
+function vworldTileUrl(x, y, zoom) {
+  const tileCount = 2 ** zoom;
+  const wrappedX = ((x % tileCount) + tileCount) % tileCount;
+  return `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_API_KEY}/${VWORLD_MAP.layer}/${zoom}/${y}/${wrappedX}.png`;
+}
+
 function renderMap() {
   const selected = landmarks[state.selectedLandmark] || landmarks[0];
   if (!selected) return;
+
+  renderVworldMap();
 
   screen.querySelectorAll("[data-landmark]").forEach((button) => {
     const landmark = landmarks[Number(button.dataset.landmark)];
