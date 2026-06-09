@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="탄감자 앱 아이콘">
+  <rect width="192" height="192" rx="42" fill="#0f5bd8"/>
+  <circle cx="96" cy="100" r="58" fill="#ffffff"/>
+  <circle cx="96" cy="100" r="44" fill="#2f9b4c"/>
+  <path fill="#ffffff" d="M59 112h20l18-32 18 32h20l-24-48H91l-32 48Z"/>
+  <path fill="#ffffff" d="M54 127h84v12H54z"/>
+  <path fill="#8fd370" d="M111 54c8-24 28-34 52-30-4 25-20 42-52 30Z"/>
+  <path fill="#ffffff" opacity=".9" d="M121 49c12-5 24-10 36-20-8 13-18 23-36 20Z"/>
+</svg>

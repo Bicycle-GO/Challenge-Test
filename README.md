@@ -16,6 +16,16 @@ node server.js
 
 `npm`을 사용할 수 있는 환경이라면 `npm start`로도 동일하게 실행할 수 있습니다.
 
+## Android APK
+
+`android/` 폴더에 APK 빌드용 네이티브 WebView 프로젝트를 포함했습니다.
+
+- 앱 정적 파일은 `node scripts/sync-android-assets.mjs`로 `android/app/src/main/assets/www`에 복사합니다.
+- APK 안에서는 `TangamjaNativeApi` 브리지를 통해 Android 내부 저장소에 주행, 포인트, 체크인, 검증 요청을 저장합니다.
+- Android `RideTrackingService`가 Foreground Service로 동작해 화면이 꺼져도 GPS 샘플을 기록하도록 설계했습니다.
+- Android Studio에서 `android` 폴더를 열고 `Build APK(s)`를 실행하면 `android/app/build/outputs/apk/debug/app-debug.apk`가 생성됩니다.
+- 휴대용 빌드 도구가 준비된 환경에서는 `node scripts/build-android-debug.mjs`로 debug APK를 생성합니다.
+
 ## 서버 API
 
 - `GET /api/health`: 서버 상태 확인

@@ -1,1 +1,7 @@
+.DS_Store
+.android-build/
 data/state.json
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

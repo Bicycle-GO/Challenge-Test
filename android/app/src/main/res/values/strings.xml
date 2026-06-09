@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">탄감자</string>
+    <string name="tracking_channel_name">라이딩 GPS 기록</string>
+    <string name="tracking_notification_title">탄감자 라이딩 기록 중</string>
+    <string name="tracking_notification_text">화면이 꺼져도 GPS 경로를 저장합니다.</string>
+</resources>
