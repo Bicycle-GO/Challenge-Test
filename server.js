@@ -13,6 +13,13 @@ const MAX_SAMPLE_COUNT = 1200;
 const { OFFICIAL_LANDMARKS: landmarks } = require("./landmark-data.js");
 
 const defaultState = {
+  account: {
+    loggedIn: false,
+    provider: "guest",
+    name: "게스트 라이더",
+    email: "",
+  },
+  accounts: [],
   stats: {
     users: 1250,
     rides: 820,
@@ -95,6 +102,16 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/account") {
+    await saveAccount(response, await readJsonBody(request));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/account/logout") {
+    await logoutAccount(response);
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/rides/start") {
     await startRideSession(response, await readJsonBody(request));
     return;
@@ -141,6 +158,44 @@ async function handleApi(request, response) {
   }
 
   sendJson(response, 404, { error: "API 경로를 찾을 수 없습니다." });
+}
+
+async function saveAccount(response, body) {
+  const account = normalizeAccount(body.account || body);
+  if (!account.loggedIn || !["email", "strava"].includes(account.provider)) {
+    sendJson(response, 400, { error: "저장 가능한 로그인 계정 정보가 필요합니다." });
+    return;
+  }
+
+  const state = await readState();
+  account.updatedAt = new Date().toISOString();
+  const accountKey = `${account.provider}:${account.email || account.name}`.toLowerCase();
+  const existingIndex = state.accounts.findIndex((item) => {
+    const key = `${item.provider}:${item.email || item.name}`.toLowerCase();
+    return key === accountKey;
+  });
+
+  if (existingIndex >= 0) {
+    state.accounts[existingIndex] = { ...state.accounts[existingIndex], ...account };
+  } else {
+    state.accounts.unshift(account);
+  }
+
+  state.account = account;
+  state.accounts = state.accounts.slice(0, 100);
+  await writeState(state);
+  sendJson(response, 200, {
+    message: `${account.provider === "strava" ? "Strava" : "이메일"} 계정이 서버에 등록됐습니다.`,
+    state,
+    account,
+  });
+}
+
+async function logoutAccount(response) {
+  const state = await readState();
+  state.account = structuredClone(defaultState.account);
+  await writeState(state);
+  sendJson(response, 200, { message: "서버 계정 세션을 종료했습니다.", state });
 }
 
 async function startRideSession(response, body) {
@@ -437,6 +492,10 @@ async function writeState(state) {
 
 function normalizeState(state) {
   return {
+    account: normalizeAccount(state.account),
+    accounts: Array.isArray(state.accounts)
+      ? state.accounts.map(normalizeAccount).filter((account) => account.loggedIn).slice(0, 100)
+      : [],
     stats: {
       ...defaultState.stats,
       ...(state.stats || {}),
@@ -455,6 +514,28 @@ function normalizeState(state) {
     history: Array.isArray(state.history) ? state.history : [...defaultState.history],
     requests: Array.isArray(state.requests) ? state.requests : [...defaultState.requests],
   };
+}
+
+function normalizeAccount(account) {
+  if (!account || typeof account !== "object") return structuredClone(defaultState.account);
+
+  const rawProvider = String(account.provider || "guest").toLowerCase();
+  const provider = ["email", "strava"].includes(rawProvider) ? rawProvider : "guest";
+  const loggedIn = Boolean(account.loggedIn && provider !== "guest");
+  const name = String(account.name || "").trim().slice(0, 80);
+  const email = String(account.email || "").trim().slice(0, 120);
+  const normalized = {
+    loggedIn,
+    provider: loggedIn ? provider : "guest",
+    name: loggedIn ? name || "라이더" : "게스트 라이더",
+    email: loggedIn ? email : "",
+  };
+
+  if (account.updatedAt) {
+    normalized.updatedAt = String(account.updatedAt);
+  }
+
+  return normalized;
 }
 
 function normalizeRideSession(ride) {

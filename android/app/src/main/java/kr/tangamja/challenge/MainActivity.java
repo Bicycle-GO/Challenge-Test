@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.WindowManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -54,6 +55,11 @@ public class MainActivity extends Activity {
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 callback.invoke(origin, true, false);
             }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> request.grant(request.getResources()));
+            }
         });
         webView.setWebViewClient(new LocalAssetClient());
         webView.loadUrl(APP_ORIGIN + "/index.html?apk=1");
@@ -61,8 +67,20 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView != null) {
+            webView.evaluateJavascript(
+                "window.TangamjaHandleNativeBack ? window.TangamjaHandleNativeBack() : false",
+                handled -> {
+                    if ("true".equals(handled)) {
+                        return;
+                    }
+                    if (webView.canGoBack()) {
+                        webView.goBack();
+                    } else {
+                        finish();
+                    }
+                }
+            );
             return;
         }
         super.onBackPressed();
@@ -76,6 +94,7 @@ public class MainActivity extends Activity {
                 new String[] {
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.CAMERA,
                     Manifest.permission.POST_NOTIFICATIONS
                 },
                 1001
@@ -86,7 +105,8 @@ public class MainActivity extends Activity {
         requestPermissions(
             new String[] {
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.CAMERA
             },
             1001
         );

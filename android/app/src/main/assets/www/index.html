@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=vworld-1" />
+    <link rel="stylesheet" href="styles.css?v=mobile-qr-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -17,14 +17,14 @@
 
         <div class="app-screen">
           <header class="top-bar">
-            <button class="icon-button back-button" type="button" aria-label="뒤로가기">‹</button>
+            <button class="icon-button back-button" type="button" aria-label="뒤로가기" data-action="app-back">‹</button>
             <div>
               <p class="brand">탄감자</p>
               <h1 id="screenTitle">자전거 챌린지</h1>
             </div>
-            <button class="icon-button" type="button" aria-label="알림">
-              <span class="bell-dot"></span>
-              ♧
+            <button class="icon-button settings-button" type="button" aria-label="설정 열기" data-action="open-settings">
+              <span class="bell-dot" data-settings-dot></span>
+              ⚙
             </button>
           </header>
 
@@ -144,6 +144,116 @@
         </section>
       </aside>
     </main>
+
+    <section class="settings-modal" data-settings-modal hidden aria-label="앱 설정">
+      <div class="settings-backdrop" data-action="close-settings"></div>
+      <div class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="settings-head">
+          <div>
+            <p class="eyebrow">앱 설정</p>
+            <h2 id="settingsTitle">계정, 권한, 알림</h2>
+          </div>
+          <button class="icon-button" type="button" aria-label="설정 닫기" data-action="close-settings">×</button>
+        </header>
+
+        <section class="settings-section">
+          <div class="settings-section-title">
+            <h3>로그인</h3>
+            <span data-login-status>로그인 전</span>
+          </div>
+          <div class="account-card">
+            <div class="avatar-badge" data-account-avatar>탄</div>
+            <div>
+              <strong data-account-name>게스트 라이더</strong>
+              <p data-account-copy>라이딩 기록과 포인트를 계정에 묶어 관리합니다.</p>
+            </div>
+          </div>
+          <div class="login-form">
+            <label>
+              이름
+              <input type="text" data-login-name placeholder="테스트 라이더" autocomplete="name" />
+            </label>
+            <label>
+              이메일
+              <input type="email" data-login-email placeholder="rider@example.com" autocomplete="email" />
+            </label>
+          </div>
+          <div class="settings-actions">
+            <button class="primary-action" type="button" data-action="email-login">이메일 로그인</button>
+            <button class="strava-action" type="button" data-action="strava-login">Strava로 연결</button>
+            <button class="secondary-action" type="button" data-action="logout">로그아웃</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title">
+            <h3>권한</h3>
+            <span data-permission-summary>확인 중</span>
+          </div>
+          <div class="permission-grid">
+            <article>
+              <span class="permission-icon">⌖</span>
+              <div>
+                <strong>위치 권한</strong>
+                <p data-location-permission>확인 중</p>
+              </div>
+              <button type="button" data-action="request-location">허용 요청</button>
+            </article>
+            <article>
+              <span class="permission-icon">!</span>
+              <div>
+                <strong>알림 권한</strong>
+                <p data-notification-permission>확인 중</p>
+              </div>
+              <button type="button" data-action="request-notification">알림 허용</button>
+            </article>
+          </div>
+          <p class="settings-help">
+            위치 권한은 라이딩 거리와 명소 100m 체크인에 사용되고, 알림은 접근 알림과 검증 결과 안내에 사용됩니다.
+          </p>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title">
+            <h3>알림 설정</h3>
+            <button type="button" data-action="send-test-notification">테스트 알림</button>
+          </div>
+          <label class="toggle-row">
+            <input type="checkbox" data-setting="rideReminders" />
+            <span>라이딩 시작/종료 리마인드</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" data-setting="nearbyLandmarks" />
+            <span>명소 100m 접근 알림</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" data-setting="rewardUpdates" />
+            <span>포인트 적립과 관리자 승인 알림</span>
+          </label>
+        </section>
+      </div>
+    </section>
+
+    <section class="qr-scanner-modal" data-qr-scanner hidden aria-label="QR 카메라 스캔">
+      <div class="qr-scanner-sheet">
+        <header class="qr-scanner-head">
+          <button class="icon-button" type="button" aria-label="QR 스캔 뒤로가기" data-action="close-qr-scanner">‹</button>
+          <div>
+            <p class="eyebrow">현장 QR 인증</p>
+            <h2 data-qr-title>QR 스캔</h2>
+          </div>
+        </header>
+        <div class="camera-stage">
+          <video data-qr-video autoplay muted playsinline></video>
+          <div class="scan-frame" aria-hidden="true"></div>
+          <p data-qr-status>카메라를 준비하고 있습니다.</p>
+        </div>
+        <div class="qr-scanner-actions">
+          <button class="secondary-action" type="button" data-action="close-qr-scanner">뒤로가기</button>
+          <button class="primary-action" type="button" data-action="simulate-qr-success">테스트 인증 완료</button>
+        </div>
+      </div>
+    </section>
 
     <template id="homeTemplate">
       <section class="hero-panel">
@@ -274,13 +384,18 @@
       </section>
       <div class="map-board" aria-label="V-WORLD 기반 전북 명소 지도" data-vworld-map>
         <div class="vworld-tile-layer" data-vworld-tiles aria-hidden="true"></div>
-        <span class="map-line"></span>
+        <div class="map-controls" aria-label="지도 조작">
+          <button type="button" data-action="map-zoom-in" aria-label="지도 확대">+</button>
+          <button type="button" data-action="map-zoom-out" aria-label="지도 축소">−</button>
+        </div>
+        <span class="map-crosshair" aria-hidden="true">+</span>
         <button class="map-pin p1" type="button" data-landmark="0">고창 선운사</button>
         <button class="map-pin p2" type="button" data-landmark="1">덕유산</button>
         <button class="map-pin p3" type="button" data-landmark="2">전주 한옥마을</button>
         <button class="map-pin p4" type="button" data-landmark="3">군산 근대역사거리</button>
         <button class="map-pin p5" type="button" data-landmark="4">익산 미륵사지</button>
         <button class="bike-position" type="button" data-action="move-near">현재 위치</button>
+        <span class="map-hint">드래그하여 이동 · +/- 확대</span>
         <span class="vworld-attribution">V-WORLD</span>
       </div>
       <section class="landmark-panel" data-landmark-panel></section>
@@ -350,7 +465,7 @@
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="landmark-data.js?v=vworld-1"></script>
-    <script src="app.js?v=vworld-1" type="module"></script>
+    <script src="landmark-data.js?v=mobile-qr-1"></script>
+    <script src="app.js?v=mobile-qr-1" type="module"></script>
   </body>
 </html>

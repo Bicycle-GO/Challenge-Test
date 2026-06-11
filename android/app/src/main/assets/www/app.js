@@ -20,6 +20,26 @@ const initialState = {
   wakeStatus: "대기 중",
   activeRide: null,
   liveRides: [],
+  account: {
+    loggedIn: false,
+    provider: "guest",
+    name: "게스트 라이더",
+    email: "",
+  },
+  permissions: {
+    location: "prompt",
+    notifications: "default",
+  },
+  settings: {
+    settingsOpen: false,
+    rideReminders: true,
+    nearbyLandmarks: true,
+    rewardUpdates: true,
+  },
+  map: {
+    center: { ...VWORLD_MAP.center },
+    zoom: VWORLD_MAP.zoom,
+  },
   ride: {
     seconds: 0,
     distance: 0,
@@ -250,10 +270,18 @@ let locationWatchId = null;
 let wakeLock = null;
 let sampleQueue = [];
 let sampleFlushTimer = null;
+let qrStream = null;
+let qrDetector = null;
+let qrScanFrame = null;
+let qrCompleting = false;
+let mapDrag = null;
 
 const screen = document.querySelector("#screenContent");
 const title = document.querySelector("#screenTitle");
 const navItems = [...document.querySelectorAll(".nav-item")];
+const settingsModal = document.querySelector("[data-settings-modal]");
+const settingsButton = document.querySelector("[data-action='open-settings']");
+const qrScannerModal = document.querySelector("[data-qr-scanner]");
 const templates = {
   home: document.querySelector("#homeTemplate"),
   challenge: document.querySelector("#challengeTemplate"),
@@ -263,7 +291,9 @@ const templates = {
 };
 
 render();
+bindShellActions();
 hydrateFromServer();
+refreshPermissionState();
 registerServiceWorker();
 window.addEventListener("beforeunload", flushSamplesWithBeacon);
 document.addEventListener("visibilitychange", () => {
@@ -277,10 +307,54 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+window.TangamjaHandleNativeBack = () => {
+  if (!qrScannerModal?.hidden || state.settings.settingsOpen || state.tab !== "home") {
+    handleAppBack();
+    return true;
+  }
+  return false;
+};
+
+function bindShellActions() {
+  settingsButton?.addEventListener("click", openSettings);
+  settingsModal?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (!action) return;
+
+    if (action === "close-settings") closeSettings();
+    if (action === "email-login") loginWithEmail();
+    if (action === "strava-login") loginWithStrava();
+    if (action === "logout") logoutAccount();
+    if (action === "request-location") requestLocationPermission();
+    if (action === "request-notification") requestNotificationPermission();
+    if (action === "send-test-notification") sendTestNotification();
+  });
+
+  settingsModal?.querySelectorAll("[data-setting]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.settings[input.dataset.setting] = input.checked;
+      persistClientPrefs();
+      renderSettings();
+    });
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !qrScannerModal?.hidden) {
+      closeQrScanner();
+      return;
+    }
+    if (event.key === "Escape" && state.settings.settingsOpen) {
+      closeSettings();
+    }
+  });
+}
+
 function loadClientState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved ? mergeState(initialState, saved) : structuredClone(initialState);
+    const loaded = saved ? mergeState(initialState, saved) : structuredClone(initialState);
+    loaded.settings.settingsOpen = false;
+    return loaded;
   } catch {
     return structuredClone(initialState);
   }
@@ -292,6 +366,10 @@ function mergeState(base, saved) {
     ...saved,
     stats: { ...base.stats, ...saved.stats },
     ride: { ...base.ride, ...saved.ride },
+    account: { ...base.account, ...saved.account },
+    permissions: { ...base.permissions, ...saved.permissions },
+    settings: { ...base.settings, ...saved.settings },
+    map: { ...base.map, ...saved.map, center: { ...base.map.center, ...saved.map?.center } },
     activeRide: saved.activeRide || base.activeRide,
     liveRides: saved.liveRides || base.liveRides,
     badges: { ...base.badges, ...saved.badges },
@@ -301,6 +379,12 @@ function mergeState(base, saved) {
 }
 
 function persistClientPrefs() {
+  const settingsToStore = {
+    rideReminders: state.settings.rideReminders,
+    nearbyLandmarks: state.settings.nearbyLandmarks,
+    rewardUpdates: state.settings.rewardUpdates,
+  };
+
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
@@ -309,6 +393,10 @@ function persistClientPrefs() {
       isNearLandmark: state.isNearLandmark,
       activeRide: state.activeRide,
       ride: state.ride,
+      account: state.account,
+      permissions: state.permissions,
+      settings: settingsToStore,
+      map: state.map,
     }),
   );
 }
@@ -345,7 +433,11 @@ function applyServerState(serverState, activeRide = null) {
 }
 
 function findActiveRide(liveRides) {
-  return (liveRides || []).find((ride) => ride.status === "active" && ride.user === RIDER_NAME) || null;
+  return (liveRides || []).find((ride) => ride.status === "active" && ride.user === currentRiderName()) || null;
+}
+
+function currentRiderName() {
+  return state.account.loggedIn && state.account.name ? state.account.name : RIDER_NAME;
 }
 
 function rideFromSession(session) {
@@ -404,6 +496,7 @@ async function mutateServer(path, body, successMessage) {
 function render() {
   title.textContent = titles[state.tab];
   renderWebSummary();
+  renderSettings();
   navItems.forEach((item) => {
     item.classList.toggle("active", item.dataset.tab === state.tab);
   });
@@ -415,6 +508,233 @@ function render() {
   if (state.tab === "map") renderMap();
   if (state.tab === "points") renderPoints();
   if (state.tab === "admin") renderAdmin();
+}
+
+function renderSettings() {
+  if (!settingsModal) return;
+
+  settingsModal.hidden = !state.settings.settingsOpen;
+  document.body.classList.toggle("settings-open", state.settings.settingsOpen);
+
+  const accountName = settingsModal.querySelector("[data-account-name]");
+  const accountCopy = settingsModal.querySelector("[data-account-copy]");
+  const accountAvatar = settingsModal.querySelector("[data-account-avatar]");
+  const loginStatus = settingsModal.querySelector("[data-login-status]");
+  const nameInput = settingsModal.querySelector("[data-login-name]");
+  const emailInput = settingsModal.querySelector("[data-login-email]");
+  const locationText = settingsModal.querySelector("[data-location-permission]");
+  const notificationText = settingsModal.querySelector("[data-notification-permission]");
+  const permissionSummary = settingsModal.querySelector("[data-permission-summary]");
+
+  if (accountName) accountName.textContent = state.account.name || "게스트 라이더";
+  if (accountCopy) {
+    accountCopy.textContent = state.account.loggedIn
+      ? `${providerLabel(state.account.provider)} 계정으로 기록을 관리 중입니다.`
+      : "라이딩 기록과 포인트를 계정에 묶어 관리합니다.";
+  }
+  if (accountAvatar) accountAvatar.textContent = (state.account.name || "탄").trim().slice(0, 1);
+  if (loginStatus) loginStatus.textContent = state.account.loggedIn ? "로그인됨" : "로그인 전";
+  if (nameInput && document.activeElement !== nameInput) nameInput.value = state.account.loggedIn ? state.account.name : "";
+  if (emailInput && document.activeElement !== emailInput) emailInput.value = state.account.email || "";
+  if (locationText) locationText.textContent = permissionLabel("location", state.permissions.location);
+  if (notificationText) notificationText.textContent = permissionLabel("notifications", state.permissions.notifications);
+  if (permissionSummary) permissionSummary.textContent = permissionSummaryText();
+
+  settingsModal.querySelectorAll("[data-setting]").forEach((input) => {
+    input.checked = Boolean(state.settings[input.dataset.setting]);
+  });
+
+  const dot = document.querySelector("[data-settings-dot]");
+  if (dot) {
+    const needsAttention = !state.account.loggedIn || state.permissions.location !== "granted" || state.permissions.notifications !== "granted";
+    dot.hidden = !needsAttention;
+  }
+}
+
+function providerLabel(provider) {
+  return {
+    email: "이메일",
+    strava: "Strava",
+    guest: "게스트",
+  }[provider] || provider;
+}
+
+function permissionLabel(type, value) {
+  const labels = {
+    location: {
+      granted: "허용됨: 라이딩 GPS와 명소 접근 인증 가능",
+      denied: "차단됨: 브라우저 설정에서 위치 권한을 다시 허용해야 합니다",
+      prompt: "대기 중: 허용 요청 버튼으로 권한을 요청하세요",
+      unsupported: "미지원: 이 환경에서는 위치 권한을 사용할 수 없습니다",
+    },
+    notifications: {
+      granted: "허용됨: 리마인드와 검증 결과 알림 가능",
+      denied: "차단됨: 브라우저 설정에서 알림 권한을 다시 허용해야 합니다",
+      default: "대기 중: 알림 허용 버튼으로 권한을 요청하세요",
+      unsupported: "미지원: 이 환경에서는 알림을 사용할 수 없습니다",
+    },
+  };
+  return labels[type]?.[value] || "확인 중";
+}
+
+function permissionSummaryText() {
+  const locationReady = state.permissions.location === "granted";
+  const notificationReady = state.permissions.notifications === "granted";
+  if (locationReady && notificationReady) return "주행 기록과 알림 준비 완료";
+  if (locationReady) return "위치 준비, 알림 대기";
+  if (notificationReady) return "알림 준비, 위치 대기";
+  return "권한 설정 필요";
+}
+
+function openSettings() {
+  state.settings.settingsOpen = true;
+  persistClientPrefs();
+  refreshPermissionState();
+  renderSettings();
+}
+
+function closeSettings() {
+  state.settings.settingsOpen = false;
+  persistClientPrefs();
+  renderSettings();
+}
+
+async function refreshPermissionState() {
+  if (!("geolocation" in navigator)) {
+    state.permissions.location = "unsupported";
+  } else if (navigator.permissions?.query) {
+    try {
+      const location = await navigator.permissions.query({ name: "geolocation" });
+      state.permissions.location = location.state;
+      location.onchange = () => {
+        state.permissions.location = location.state;
+        persistClientPrefs();
+        renderSettings();
+      };
+    } catch {
+      state.permissions.location = state.permissions.location || "prompt";
+    }
+  }
+
+  state.permissions.notifications = "Notification" in window ? Notification.permission : "unsupported";
+  persistClientPrefs();
+  renderSettings();
+}
+
+async function loginWithEmail() {
+  const name = settingsModal.querySelector("[data-login-name]")?.value.trim() || "테스트 라이더";
+  const email = settingsModal.querySelector("[data-login-email]")?.value.trim() || "rider@example.com";
+  state.account = { loggedIn: true, provider: "email", name, email };
+  persistClientPrefs();
+  renderSettings();
+  await syncAccountToServer(`${name} 계정으로 로그인했습니다.`);
+}
+
+async function loginWithStrava() {
+  const name = settingsModal.querySelector("[data-login-name]")?.value.trim() || "Strava 라이더";
+  const email = settingsModal.querySelector("[data-login-email]")?.value.trim() || "strava-rider@example.com";
+  state.account = { loggedIn: true, provider: "strava", name, email };
+  persistClientPrefs();
+  renderSettings();
+  await syncAccountToServer("Strava 연동형 로그인 상태로 전환했습니다.");
+}
+
+async function logoutAccount() {
+  state.account = structuredClone(initialState.account);
+  persistClientPrefs();
+  renderSettings();
+  try {
+    const payload = await apiRequest("/account/logout", { method: "POST", body: "{}" });
+    applyServerState(payload.state);
+    showToast(payload.message || "로그아웃했습니다.");
+  } catch {
+    showToast("로그아웃했습니다.");
+  }
+}
+
+async function syncAccountToServer(fallbackMessage) {
+  try {
+    const payload = await apiRequest("/account", {
+      method: "POST",
+      body: JSON.stringify({ account: state.account }),
+    });
+    applyServerState(payload.state);
+    state.account = payload.account || state.account;
+    persistClientPrefs();
+    renderSettings();
+    showToast(payload.message || fallbackMessage);
+  } catch {
+    showToast(`${fallbackMessage} 서버 동기화는 나중에 다시 시도합니다.`);
+  }
+}
+
+function requestLocationPermission() {
+  if (!("geolocation" in navigator)) {
+    state.permissions.location = "unsupported";
+    renderSettings();
+    showToast("이 환경에서는 위치 권한을 사용할 수 없습니다.");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      state.permissions.location = "granted";
+      state.gpsStatus = position.coords.accuracy ? `위치 권한 허용됨 ±${Math.round(position.coords.accuracy)}m` : "위치 권한 허용됨";
+      persistClientPrefs();
+      render();
+      showToast("위치 권한이 허용되었습니다.");
+    },
+    (error) => {
+      state.permissions.location = error.code === 1 ? "denied" : "prompt";
+      persistClientPrefs();
+      renderSettings();
+      showToast(error.code === 1 ? "위치 권한이 거부되었습니다." : "현재 위치를 확인하지 못했습니다.");
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+  );
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    state.permissions.notifications = "unsupported";
+    persistClientPrefs();
+    renderSettings();
+    showToast("이 환경에서는 알림을 사용할 수 없습니다.");
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  state.permissions.notifications = permission;
+  persistClientPrefs();
+  renderSettings();
+  showToast(permission === "granted" ? "알림 권한이 허용되었습니다." : "알림 권한이 허용되지 않았습니다.");
+}
+
+async function sendTestNotification() {
+  if (state.permissions.notifications !== "granted") {
+    await requestNotificationPermission();
+  }
+  if (state.permissions.notifications !== "granted") return;
+
+  const title = "탄감자 알림 테스트";
+  const options = {
+    body: "명소 접근, 포인트 적립, 관리자 승인 알림이 이 방식으로 표시됩니다.",
+    icon: "assets/icon.svg",
+    badge: "assets/icon.svg",
+  };
+
+  try {
+    const registration = await navigator.serviceWorker?.ready;
+    if (registration?.showNotification) {
+      await registration.showNotification(title, options);
+    } else {
+      new Notification(title, options);
+    }
+    showToast("테스트 알림을 보냈습니다.");
+  } catch {
+    new Notification(title, options);
+    showToast("테스트 알림을 보냈습니다.");
+  }
 }
 
 function renderWebSummary() {
@@ -676,8 +996,8 @@ function renderVworldMap() {
   const width = board.clientWidth || 360;
   const height = board.clientHeight || 280;
   const tileSize = VWORLD_MAP.tileSize;
-  const zoom = VWORLD_MAP.zoom;
-  const center = lonLatToWorldPixel(VWORLD_MAP.center.lng, VWORLD_MAP.center.lat, zoom, tileSize);
+  const zoom = state.map.zoom;
+  const center = lonLatToWorldPixel(state.map.center.lng, state.map.center.lat, zoom, tileSize);
   const centerTileX = Math.floor(center.x / tileSize);
   const centerTileY = Math.floor(center.y / tileSize);
   const offsetX = width / 2 - (center.x - centerTileX * tileSize);
@@ -701,6 +1021,7 @@ function renderVworldMap() {
   }
 
   layer.replaceChildren(...tiles);
+  bindInteractiveMap(board);
 }
 
 function lonLatToWorldPixel(lng, lat, zoom, tileSize) {
@@ -710,6 +1031,65 @@ function lonLatToWorldPixel(lng, lat, zoom, tileSize) {
     x: ((lng + 180) / 360) * scale,
     y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
   };
+}
+
+function worldPixelToLonLat(x, y, zoom, tileSize) {
+  const scale = tileSize * 2 ** zoom;
+  const lng = (x / scale) * 360 - 180;
+  const n = Math.PI - (2 * Math.PI * y) / scale;
+  const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  return {
+    lat: Math.max(Math.min(lat, 85.05112878), -85.05112878),
+    lng: ((lng + 540) % 360) - 180,
+  };
+}
+
+function bindInteractiveMap(board) {
+  if (board.dataset.mapBound === "true") return;
+  board.dataset.mapBound = "true";
+
+  board.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    board.setPointerCapture?.(event.pointerId);
+    mapDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      center: { ...state.map.center },
+      moved: false,
+    };
+    board.classList.add("dragging");
+  });
+
+  board.addEventListener("pointermove", (event) => {
+    if (!mapDrag || mapDrag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - mapDrag.startX;
+    const dy = event.clientY - mapDrag.startY;
+    if (Math.abs(dx) + Math.abs(dy) < 4) return;
+    mapDrag.moved = true;
+    const pixel = lonLatToWorldPixel(mapDrag.center.lng, mapDrag.center.lat, state.map.zoom, VWORLD_MAP.tileSize);
+    state.map.center = worldPixelToLonLat(pixel.x - dx, pixel.y - dy, state.map.zoom, VWORLD_MAP.tileSize);
+    renderVworldMap();
+  });
+
+  const finishDrag = (event) => {
+    if (!mapDrag || mapDrag.pointerId !== event.pointerId) return;
+    board.releasePointerCapture?.(event.pointerId);
+    board.classList.remove("dragging");
+    if (mapDrag.moved) {
+      persistClientPrefs();
+    }
+    mapDrag = null;
+  };
+
+  board.addEventListener("pointerup", finishDrag);
+  board.addEventListener("pointercancel", finishDrag);
+}
+
+function updateMapZoom(delta) {
+  state.map.zoom = Math.max(7, Math.min(13, state.map.zoom + delta));
+  persistClientPrefs();
+  render();
 }
 
 function vworldTileUrl(x, y, zoom) {
@@ -839,7 +1219,13 @@ document.addEventListener("click", (event) => {
   if (!target) return;
 
   if (target.dataset.tab) {
+    closeQrScanner();
     setTab(target.dataset.tab);
+    return;
+  }
+
+  if (target.dataset.action === "app-back") {
+    handleAppBack();
     return;
   }
 
@@ -866,6 +1252,26 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.action === "close-qr-scanner") {
+    closeQrScanner();
+    return;
+  }
+
+  if (target.dataset.action === "simulate-qr-success") {
+    completeQrScan("TANGAMJA-DEMO-QR");
+    return;
+  }
+
+  if (target.dataset.action === "map-zoom-in") {
+    updateMapZoom(1);
+    return;
+  }
+
+  if (target.dataset.action === "map-zoom-out") {
+    updateMapZoom(-1);
+    return;
+  }
+
   if (target.dataset.action === "request-exchange") {
     requestExchange();
     return;
@@ -881,6 +1287,22 @@ document.addEventListener("click", (event) => {
   }
 });
 
+function handleAppBack() {
+  if (!qrScannerModal?.hidden) {
+    closeQrScanner();
+    return;
+  }
+  if (state.settings.settingsOpen) {
+    closeSettings();
+    return;
+  }
+  if (state.tab !== "home") {
+    setTab("home");
+    return;
+  }
+  showToast("홈 화면입니다.");
+}
+
 function setTab(tab) {
   state.tab = tab;
   persistClientPrefs();
@@ -894,7 +1316,7 @@ async function toggleRide() {
     return;
   }
 
-  const payload = await mutateServer("/rides/start", { user: RIDER_NAME }, "서버에 라이딩 세션을 시작했습니다.");
+  const payload = await mutateServer("/rides/start", { user: currentRiderName() }, "서버에 라이딩 세션을 시작했습니다.");
   if (!payload?.activeRide) return;
 
   state.activeRide = payload.activeRide;
@@ -1040,7 +1462,7 @@ async function finishRide() {
   try {
     const payload = await apiRequest(`/rides/${encodeURIComponent(state.activeRide.id)}/finish`, {
       method: "POST",
-      body: JSON.stringify({ user: RIDER_NAME }),
+      body: JSON.stringify({ user: currentRiderName() }),
     });
     stopLocalTracking();
     state.activeRide = null;
@@ -1057,11 +1479,124 @@ async function finishRide() {
 
 async function scanQr() {
   const selected = landmarks[state.selectedLandmark] || landmarks[0];
+  if (!selected) return;
+
+  if (!(state.isNearLandmark || selected.near <= 100)) {
+    showToast("명소 반경 100m 이내에서만 QR 스캔이 가능합니다.");
+    return;
+  }
+
+  openQrScanner(selected);
+}
+
+async function openQrScanner(selected) {
+  if (!qrScannerModal) return;
+
+  const title = qrScannerModal.querySelector("[data-qr-title]");
+  const status = qrScannerModal.querySelector("[data-qr-status]");
+  const video = qrScannerModal.querySelector("[data-qr-video]");
+  if (title) title.textContent = `${selected.name} QR 스캔`;
+  if (status) status.textContent = "카메라 권한을 요청하고 있습니다.";
+  qrScannerModal.hidden = false;
+  document.body.classList.add("scanner-open");
+  qrCompleting = false;
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    if (status) status.textContent = "이 브라우저에서는 카메라를 사용할 수 없습니다. 테스트 인증으로 흐름을 확인하세요.";
+    return;
+  }
+
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+    video.srcObject = qrStream;
+    await video.play();
+    if (status) status.textContent = "카메라가 켜졌습니다. 현장 QR을 프레임 안에 맞춰주세요.";
+    startQrDetectionLoop(video, status);
+  } catch (error) {
+    if (status) {
+      status.textContent = error?.name === "NotAllowedError"
+        ? "카메라 권한이 차단되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요."
+        : "카메라를 시작하지 못했습니다. 테스트 인증으로 흐름을 확인하세요.";
+    }
+    showToast("카메라 권한 또는 장치 상태를 확인해주세요.");
+  }
+}
+
+async function startQrDetectionLoop(video, status) {
+  if (!("BarcodeDetector" in window)) {
+    if (status) status.textContent = "카메라는 켜졌지만 이 브라우저는 QR 자동 판독을 지원하지 않습니다. 테스트 인증으로 진행할 수 있습니다.";
+    return;
+  }
+
+  try {
+    qrDetector = new BarcodeDetector({ formats: ["qr_code"] });
+  } catch {
+    if (status) status.textContent = "QR 판독기를 초기화하지 못했습니다. 테스트 인증으로 진행할 수 있습니다.";
+    return;
+  }
+
+  const tick = async () => {
+    if (qrScannerModal?.hidden || qrCompleting) return;
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      try {
+        const codes = await qrDetector.detect(video);
+        if (codes.length) {
+          await completeQrScan(codes[0].rawValue || "TANGAMJA-QR");
+          return;
+        }
+      } catch {
+        if (status) status.textContent = "QR을 읽는 중입니다. 화면을 조금 더 밝게 비춰주세요.";
+      }
+    }
+    qrScanFrame = requestAnimationFrame(tick);
+  };
+
+  qrScanFrame = requestAnimationFrame(tick);
+}
+
+function closeQrScanner() {
+  if (!qrScannerModal || qrScannerModal.hidden) return;
+  if (qrScanFrame) {
+    cancelAnimationFrame(qrScanFrame);
+    qrScanFrame = null;
+  }
+  if (qrStream) {
+    qrStream.getTracks().forEach((track) => track.stop());
+    qrStream = null;
+  }
+  const video = qrScannerModal.querySelector("[data-qr-video]");
+  if (video) {
+    video.pause();
+    video.srcObject = null;
+  }
+  qrDetector = null;
+  qrCompleting = false;
+  qrScannerModal.hidden = true;
+  document.body.classList.remove("scanner-open");
+}
+
+async function completeQrScan(rawValue) {
+  if (qrCompleting) return;
+  qrCompleting = true;
+  const status = qrScannerModal?.querySelector("[data-qr-status]");
+  if (status) status.textContent = "QR 인증을 서버에 저장하고 있습니다.";
+  await saveQrCheckin(rawValue);
+}
+
+async function saveQrCheckin(qrValue) {
+  const selected = landmarks[state.selectedLandmark] || landmarks[0];
   const payload = await mutateServer(
     "/checkins",
     {
       landmarkIndex: state.selectedLandmark,
-      user: RIDER_NAME,
+      user: currentRiderName(),
       landmark: selected
         ? {
             name: selected.name,
@@ -1070,19 +1605,26 @@ async function scanQr() {
             distance: selected.distance,
             bonus: selected.bonus,
             near: selected.near,
+            qrValue,
           }
         : null,
     },
     "QR 체크인이 서버에 저장됐습니다.",
   );
 
-  if (!payload) return;
+  if (!payload) {
+    qrCompleting = false;
+    const status = qrScannerModal?.querySelector("[data-qr-status]");
+    if (status) status.textContent = "서버 저장에 실패했습니다. 다시 스캔하거나 뒤로가기를 눌러주세요.";
+    return;
+  }
+  closeQrScanner();
   state.isNearLandmark = false;
   setTab("points");
 }
 
 async function requestExchange() {
-  await mutateServer("/exchanges", { user: RIDER_NAME }, "포인트 전환 신청이 서버에 등록됐습니다.");
+  await mutateServer("/exchanges", { user: currentRiderName() }, "포인트 전환 신청이 서버에 등록됐습니다.");
 }
 
 async function reviewRequest(id, status) {
