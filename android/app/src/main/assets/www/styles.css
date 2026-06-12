@@ -1115,6 +1115,54 @@ dd {
   line-height: 1.45;
 }
 
+.server-qr-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #b9d1f3;
+  border-radius: var(--radius);
+  background: #f0f6fd;
+}
+
+.server-qr-card strong,
+.server-qr-card small,
+.server-qr-card code {
+  display: block;
+}
+
+.server-qr-card strong {
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
+.server-qr-card small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.server-qr-card code {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: var(--blue-deep);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.server-qr-card img {
+  width: 104px;
+  height: 104px;
+  padding: 6px;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 8px 18px rgba(7, 28, 88, 0.12);
+}
+
 .official-directory {
   display: grid;
   gap: 10px;

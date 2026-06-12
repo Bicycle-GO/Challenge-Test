@@ -12,13 +12,16 @@ const files = [
   "manifest.webmanifest",
   "sw.js",
   "assets",
+  "data/qr-images",
 ];
 
 await rm(target, { recursive: true, force: true });
 await mkdir(target, { recursive: true });
 
 for (const file of files) {
-  await cp(join(root, file), join(target, file), { recursive: true });
+  const destination = join(target, file);
+  await mkdir(dirname(destination), { recursive: true });
+  await cp(join(root, file), destination, { recursive: true });
 }
 
 console.log(`Synced ${files.length} web app entries to ${target}`);

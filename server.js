@@ -1,4 +1,5 @@
 const http = require("node:http");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
@@ -11,6 +12,19 @@ const POINTS_PER_CO2_KG = 100;
 const EARTH_RADIUS_KM = 6371;
 const MAX_SAMPLE_COUNT = 1200;
 const { OFFICIAL_LANDMARKS: landmarks } = require("./landmark-data.js");
+
+const defaultQrCodes = [
+  {
+    id: "jeonju-3-1-birthplace",
+    landmarkName: "전주3.1운동발상지",
+    payload: "TANGAMJA:CHECKIN:JEONJU-3-1-MOVEMENT-BIRTHPLACE:v1",
+    imagePath: "data/qr-images/전주3.1운동발상지.svg",
+    status: "active",
+    radiusMeters: 100,
+    description: "전주3.1운동발상지 현장 게시용 방문 인증 QR",
+    createdAt: "2026-06-13T00:00:00+09:00",
+  },
+];
 
 const defaultState = {
   account: {
@@ -34,6 +48,8 @@ const defaultState = {
     special: [],
   },
   liveRides: [],
+  qrCodes: defaultQrCodes,
+  visitProofs: [],
   history: [
     {
       title: "전주 한옥마을 QR 체크인",
@@ -106,6 +122,30 @@ async function handleApi(request, response) {
 
   if (request.method === "GET" && url.pathname === "/api/state") {
     sendJson(response, 200, { state: await readState() });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/qr-codes") {
+    const state = await readState();
+    sendJson(response, 200, { qrCodes: state.qrCodes.map(publicQrCode) });
+    return;
+  }
+
+  if (request.method === "GET" && /^\/api\/qr-codes\/[^/]+$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.split("/")[3]);
+    const state = await readState();
+    const qrCode = state.qrCodes.find((item) => item.id === id);
+    if (!qrCode) {
+      sendJson(response, 404, { error: "등록된 QR 코드를 찾을 수 없습니다." });
+      return;
+    }
+    sendJson(response, 200, { qrCode: publicQrCode(qrCode) });
+    return;
+  }
+
+  if (request.method === "GET" && /^\/api\/qr-codes\/[^/]+\/image\.svg$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.split("/")[3]);
+    await serveQrImage(response, id);
     return;
   }
 
@@ -358,18 +398,37 @@ async function saveCheckin(response, body) {
   }
 
   const state = await readState();
+  const qrCode = findQrCodeForLandmark(state, landmark);
+  const scannedValue = normalizeQrPayload(body.qrValue || body.landmark?.qrValue || "");
+  if (qrCode && scannedValue !== normalizeQrPayload(qrCode.payload)) {
+    sendJson(response, 422, { error: `${landmark.name}에 등록된 서버 QR 이미지와 일치하지 않습니다.` });
+    return;
+  }
+
   const alreadyChecked = state.history.some((item) => item.title.includes(landmark.name));
   const points = alreadyChecked ? Math.round(landmark.bonus / 3) : landmark.bonus;
   const co2 = round(landmark.distance * CO2_PER_KM, 3);
+  const scannedAt = new Date().toISOString();
+  const proof = createVisitProof({
+    user: body.user || "테스트 라이더",
+    landmark,
+    qrCode,
+    scannedValue,
+    points,
+    co2,
+    scannedAt,
+  });
 
   state.stats.totalPoints += points;
   state.stats.weeklyPoints[6] += points;
   state.history.unshift({
     title: `${landmark.name} QR 체크인`,
-    meta: `반경 ${landmark.near}m 현장 인증`,
+    meta: qrCode ? `서버 QR ${qrCode.id} 현장 인증` : `반경 ${landmark.near}m 현장 인증`,
     points,
     type: "earn",
+    proofId: proof.id,
   });
+  state.visitProofs.unshift(proof);
 
   addUnique(state.badges.mission, "명소 체크인");
   if (state.history.filter((item) => item.title.includes("QR 체크인")).length >= 3) {
@@ -384,12 +443,22 @@ async function saveCheckin(response, body) {
     co2,
     points,
     status: "pending",
-    evidence: `GPS 반경 ${landmark.near}m, QR 스캔 성공, 중복 여부 서버 확인`,
+    proofId: proof.id,
+    qrCodeId: qrCode?.id || "legacy-qr",
+    evidence: qrCode
+      ? `서버 저장 QR(${qrCode.id}) payload 일치, GPS 반경 ${landmark.near}m, 방문 증명 ${proof.id}`
+      : `GPS 반경 ${landmark.near}m, QR 스캔 성공, 중복 여부 서버 확인`,
   });
 
   trimCollections(state);
   await writeState(state);
-  sendJson(response, 201, { message: "QR 체크인이 서버에 저장되고 보너스 포인트가 적립됐습니다.", state });
+  sendJson(response, 201, {
+    message: qrCode
+      ? `${landmark.name} 서버 QR이 일치하여 방문 인증이 저장됐습니다.`
+      : "QR 체크인이 서버에 저장되고 보너스 포인트가 적립됐습니다.",
+    state,
+    proof,
+  });
 }
 
 async function requestExchange(response, body) {
@@ -480,6 +549,33 @@ async function serveStatic(request, response) {
   }
 }
 
+async function serveQrImage(response, id) {
+  const state = await readState();
+  const qrCode = state.qrCodes.find((item) => item.id === id);
+  if (!qrCode) {
+    sendJson(response, 404, { error: "등록된 QR 이미지를 찾을 수 없습니다." });
+    return;
+  }
+
+  const imagePath = path.normalize(path.join(ROOT, qrCode.imagePath));
+  const relativePath = path.relative(ROOT, imagePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    sendJson(response, 403, { error: "QR 이미지 경로가 허용되지 않습니다." });
+    return;
+  }
+
+  try {
+    const image = await fs.readFile(imagePath);
+    response.writeHead(200, {
+      "Content-Type": "image/svg+xml; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    response.end(image);
+  } catch {
+    sendJson(response, 404, { error: "QR 이미지 파일이 서버에 없습니다." });
+  }
+}
+
 async function readState() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   try {
@@ -518,8 +614,94 @@ function normalizeState(state) {
     liveRides: Array.isArray(state.liveRides)
       ? state.liveRides.map(normalizeRideSession).filter(Boolean).slice(0, 20)
       : [],
+    qrCodes: mergeQrCodes(state.qrCodes),
+    visitProofs: Array.isArray(state.visitProofs)
+      ? state.visitProofs.map(normalizeVisitProof).filter(Boolean).slice(0, 100)
+      : [],
     history: Array.isArray(state.history) ? state.history : [...defaultState.history],
     requests: Array.isArray(state.requests) ? state.requests : [...defaultState.requests],
+  };
+}
+
+function mergeQrCodes(qrCodes) {
+  const merged = new Map(defaultQrCodes.map((qrCode) => [qrCode.id, normalizeQrCode(qrCode)]));
+  if (Array.isArray(qrCodes)) {
+    qrCodes.forEach((qrCode) => {
+      const normalized = normalizeQrCode(qrCode);
+      if (normalized) merged.set(normalized.id, { ...merged.get(normalized.id), ...normalized });
+    });
+  }
+  return [...merged.values()];
+}
+
+function normalizeQrCode(qrCode) {
+  if (!qrCode || typeof qrCode !== "object" || !qrCode.id || !qrCode.payload) return null;
+  return {
+    id: String(qrCode.id).trim(),
+    landmarkName: String(qrCode.landmarkName || "").trim(),
+    payload: String(qrCode.payload),
+    imagePath: String(qrCode.imagePath || ""),
+    status: qrCode.status === "inactive" ? "inactive" : "active",
+    radiusMeters: Math.max(1, Number(qrCode.radiusMeters) || 100),
+    description: String(qrCode.description || ""),
+    createdAt: String(qrCode.createdAt || new Date().toISOString()),
+  };
+}
+
+function publicQrCode(qrCode) {
+  return {
+    id: qrCode.id,
+    landmarkName: qrCode.landmarkName,
+    status: qrCode.status,
+    radiusMeters: qrCode.radiusMeters,
+    description: qrCode.description,
+    imageUrl: `/api/qr-codes/${encodeURIComponent(qrCode.id)}/image.svg`,
+    createdAt: qrCode.createdAt,
+  };
+}
+
+function findQrCodeForLandmark(state, landmark) {
+  if (!landmark?.qrCodeId) return null;
+  return state.qrCodes.find((qrCode) => qrCode.id === landmark.qrCodeId && qrCode.status === "active") || null;
+}
+
+function normalizeQrPayload(value) {
+  return String(value || "").trim();
+}
+
+function createVisitProof({ user, landmark, qrCode, scannedValue, points, co2, scannedAt }) {
+  const hash = crypto
+    .createHash("sha256")
+    .update([user, landmark.id, qrCode?.id || "legacy", scannedValue, scannedAt].join("|"))
+    .digest("hex");
+
+  return {
+    id: `PROOF-${Date.now()}-${hash.slice(0, 8)}`,
+    user,
+    landmarkId: landmark.id,
+    landmarkName: landmark.name,
+    qrCodeId: qrCode?.id || "legacy-qr",
+    scannedAt,
+    points,
+    co2,
+    status: "pending-admin-review",
+    evidenceHash: hash,
+  };
+}
+
+function normalizeVisitProof(proof) {
+  if (!proof || typeof proof !== "object" || !proof.id) return null;
+  return {
+    id: String(proof.id),
+    user: String(proof.user || "테스트 라이더"),
+    landmarkId: String(proof.landmarkId || ""),
+    landmarkName: String(proof.landmarkName || ""),
+    qrCodeId: String(proof.qrCodeId || "legacy-qr"),
+    scannedAt: String(proof.scannedAt || new Date().toISOString()),
+    points: Number(proof.points) || 0,
+    co2: Number(proof.co2) || 0,
+    status: String(proof.status || "pending-admin-review"),
+    evidenceHash: String(proof.evidenceHash || ""),
   };
 }
 
@@ -644,6 +826,9 @@ function sendJson(response, status, payload) {
 function trimCollections(state) {
   state.history = state.history.slice(0, 60);
   state.requests = state.requests.slice(0, 60);
+  if (Array.isArray(state.visitProofs)) {
+    state.visitProofs = state.visitProofs.slice(0, 100);
+  }
 }
 
 function addUnique(list, value) {

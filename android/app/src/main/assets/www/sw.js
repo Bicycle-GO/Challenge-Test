@@ -1,4 +1,4 @@
-const CACHE_NAME = "tangamja-bike-carbon-v13";
+const CACHE_NAME = "tangamja-bike-carbon-v15";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const APP_SHELL = [
   "./app.js",
   "./manifest.webmanifest",
   "./assets/icon.svg",
+  "./data/qr-images/전주3.1운동발상지.svg",
 ];
 
 self.addEventListener("install", (event) => {

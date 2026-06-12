@@ -5,6 +5,15 @@ const OFFICIAL_LANDMARK_SOURCE = {
 
 const OFFICIAL_LANDMARKS = [
   { name: "전주한옥마을", city: "전주", category: "역사·문화", sourceLevel: "kto100" },
+  {
+    name: "전주3.1운동발상지",
+    city: "전주",
+    category: "역사·문화",
+    sourceLevel: "tourJeonbuk",
+    qrCodeId: "jeonju-3-1-birthplace",
+    qrImageFile: "전주3.1운동발상지.svg",
+    qrPayload: "TANGAMJA:CHECKIN:JEONJU-3-1-MOVEMENT-BIRTHPLACE:v1",
+  },
   { name: "내장산국립공원", city: "정읍", category: "자연", sourceLevel: "kto100" },
   { name: "남원관광단지·광한루원", city: "남원", category: "역사·문화", sourceLevel: "kto100" },
   { name: "완주 오성한옥마을", city: "완주", category: "역사·문화", sourceLevel: "kto100" },

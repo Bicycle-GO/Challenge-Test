@@ -1181,6 +1181,7 @@ function renderMap() {
       <span>QR 반경 ${selected.near}m</span>
       <span>보너스 ${selected.bonus}P</span>
     </div>
+    ${renderServerQrCard(selected)}
   `;
 
   const canScan = state.isNearLandmark || selected.near <= 100;
@@ -1204,6 +1205,29 @@ function renderMap() {
   });
 
   renderOfficialDirectory();
+}
+
+function renderServerQrCard(landmark) {
+  if (!landmark.qrCodeId) return "";
+  const imageUrl = serverQrImageUrl(landmark);
+  return `
+    <div class="server-qr-card">
+      <div>
+        <p class="eyebrow">서버 저장 QR</p>
+        <strong>${landmark.name} 방문 인증 이미지</strong>
+        <small>현장에 게시된 이 QR을 스캔해야 방문 증명이 생성됩니다.</small>
+        <code>${landmark.qrCodeId}</code>
+      </div>
+      <img src="${imageUrl}" alt="${landmark.name} 방문 인증 QR 이미지" />
+    </div>
+  `;
+}
+
+function serverQrImageUrl(landmark) {
+  if (window.TangamjaNativeApi) {
+    return `data/qr-images/${encodeURI(landmark.qrImageFile || `${landmark.qrCodeId}.svg`)}`;
+  }
+  return `${API_BASE}/qr-codes/${encodeURIComponent(landmark.qrCodeId)}/image.svg`;
 }
 
 function renderPoints() {
@@ -1315,7 +1339,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action === "simulate-qr-success") {
-    completeQrScan("TANGAMJA-DEMO-QR");
+    const selected = landmarks[state.selectedLandmark] || landmarks[0];
+    completeQrScan(selected?.qrPayload || "TANGAMJA-DEMO-QR");
     return;
   }
 
@@ -1736,7 +1761,7 @@ async function completeQrScan(rawValue) {
   if (qrCompleting) return;
   qrCompleting = true;
   const status = qrScannerModal?.querySelector("[data-qr-status]");
-  if (status) status.textContent = "QR 인증을 서버에 저장하고 있습니다.";
+  if (status) status.textContent = "서버에 등록된 현장 QR과 대조하고 있습니다.";
   await saveQrCheckin(rawValue);
 }
 
