@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=mobile-qr-1" />
+    <link rel="stylesheet" href="styles.css?v=server-map-4" />
   </head>
   <body>
     <main class="app-shell">
@@ -309,7 +309,7 @@
           </div>
         </div>
         <p class="ride-note">
-          라이딩 시작 후 위치 권한을 허용하면 GPS 좌표가 서버에 자동 저장됩니다.
+          라이딩 시작 전 위치 권한과 첫 GPS 좌표를 확인한 뒤 서버 기록이 시작됩니다.
           웹앱은 화면이 완전히 꺼지면 기기 정책에 따라 백그라운드 GPS가 제한될 수 있습니다.
         </p>
         <button class="primary-action" type="button" data-action="toggle-ride">라이딩 시작</button>
@@ -383,6 +383,7 @@
         <h2>100m 이내에서 QR 인증</h2>
       </section>
       <div class="map-board" aria-label="V-WORLD 기반 전북 명소 지도" data-vworld-map>
+        <div class="vworld-api-map" data-vworld-api-map aria-hidden="true"></div>
         <div class="vworld-tile-layer" data-vworld-tiles aria-hidden="true"></div>
         <div class="map-controls" aria-label="지도 조작">
           <button type="button" data-action="map-zoom-in" aria-label="지도 확대">+</button>
@@ -396,6 +397,7 @@
         <button class="map-pin p5" type="button" data-landmark="4">익산 미륵사지</button>
         <button class="bike-position" type="button" data-action="move-near">현재 위치</button>
         <span class="map-hint">드래그하여 이동 · +/- 확대</span>
+        <span class="map-api-status" data-map-api-status>V-WORLD WMTS API</span>
         <span class="vworld-attribution">V-WORLD</span>
       </div>
       <section class="landmark-panel" data-landmark-panel></section>
@@ -465,7 +467,7 @@
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="landmark-data.js?v=mobile-qr-1"></script>
-    <script src="app.js?v=mobile-qr-1" type="module"></script>
+    <script src="landmark-data.js?v=server-map-4"></script>
+    <script src="app.js?v=server-map-4" type="module"></script>
   </body>
 </html>

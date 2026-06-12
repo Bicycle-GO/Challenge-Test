@@ -871,6 +871,11 @@ dd {
   touch-action: none;
 }
 
+.map-board.api-ready {
+  cursor: default;
+  touch-action: pan-x pan-y;
+}
+
 .map-board.dragging {
   cursor: grabbing;
 }
@@ -896,11 +901,21 @@ dd {
   pointer-events: none;
 }
 
+.vworld-api-map,
 .vworld-tile-layer {
   position: absolute;
   inset: 0;
   z-index: 0;
   overflow: hidden;
+}
+
+.vworld-api-map {
+  background: #dce8ee;
+}
+
+.map-board.api-fallback .vworld-api-map,
+.map-board.api-ready .vworld-tile-layer {
+  display: none;
 }
 
 .vworld-tile-layer img {
@@ -920,6 +935,20 @@ dd {
   border-radius: 99px;
   color: #083d9b;
   background: rgba(255, 255, 255, 0.86);
+  font-size: 0.64rem;
+  font-weight: 950;
+}
+
+.map-api-status {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 5;
+  max-width: calc(100% - 64px);
+  padding: 4px 7px;
+  border-radius: 99px;
+  color: var(--green-deep);
+  background: rgba(255, 255, 255, 0.9);
   font-size: 0.64rem;
   font-weight: 950;
 }
@@ -1947,6 +1976,7 @@ body.scanner-open {
   color: white;
   background: #07205d;
   box-shadow: var(--shadow);
+  pointer-events: none;
   translate: -50% 120%;
   transition: translate 180ms ease;
 }
@@ -2032,6 +2062,10 @@ body.scanner-open {
     z-index: 20;
     height: calc(74px + env(safe-area-inset-bottom));
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .toast {
+    bottom: calc(88px + env(safe-area-inset-bottom));
   }
 
   .desktop-brief {

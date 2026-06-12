@@ -90,6 +90,13 @@ server.listen(PORT, () => {
 });
 
 async function handleApi(request, response) {
+  setApiHeaders(response);
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
   const url = new URL(request.url, `http://${request.headers.host}`);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
@@ -617,6 +624,13 @@ async function readJsonBody(request) {
   } catch {
     return {};
   }
+}
+
+function setApiHeaders(response) {
+  response.setHeader("Access-Control-Allow-Origin", "*");
+  response.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Cache-Control", "no-store");
 }
 
 function sendJson(response, status, payload) {

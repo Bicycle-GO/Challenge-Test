@@ -1,7 +1,9 @@
 const STORAGE_KEY = "tangamja-bike-carbon-app";
 const CO2_PER_KM = 0.192;
-const API_BASE = "/api";
+const API_ORIGIN = location.protocol === "file:" ? "http://localhost:4173" : "";
+const API_BASE = `${API_ORIGIN}/api`;
 const RIDER_NAME = "테스트 라이더";
+const SERVER_RETRY_DELAY = 5000;
 const VWORLD_API_KEY = "E958994F-358D-38D8-8F2C-9C44597086CF";
 const VWORLD_MAP = {
   center: { lat: 35.72, lng: 127.14 },
@@ -270,11 +272,13 @@ let locationWatchId = null;
 let wakeLock = null;
 let sampleQueue = [];
 let sampleFlushTimer = null;
+let serverRetryTimer = null;
 let qrStream = null;
 let qrDetector = null;
 let qrScanFrame = null;
 let qrCompleting = false;
 let mapDrag = null;
+let pendingStartSample = null;
 
 const screen = document.querySelector("#screenContent");
 const title = document.querySelector("#screenTitle");
@@ -401,7 +405,7 @@ function persistClientPrefs() {
   );
 }
 
-async function hydrateFromServer() {
+async function hydrateFromServer({ silent = false } = {}) {
   try {
     const payload = await apiRequest("/state");
     applyServerState(payload.state);
@@ -409,18 +413,21 @@ async function hydrateFromServer() {
       startLocalRideLoop();
       startLocationWatch();
       requestWakeLock();
-      showToast("진행 중인 라이딩을 서버에서 복구했습니다.");
+      if (!silent) showToast("진행 중인 라이딩을 서버에서 복구했습니다.");
       return;
     }
-    showToast("서버 데이터와 연결되었습니다.");
-  } catch {
+    if (!silent) showToast("서버 데이터와 연결되었습니다.");
+  } catch (error) {
     state.serverOnline = false;
     render();
-    showToast("서버 API에 연결되지 않아 임시 화면으로 표시됩니다.");
+    scheduleServerReconnect();
+    if (!silent) showToast(serverConnectionMessage(error));
   }
 }
 
 function applyServerState(serverState, activeRide = null) {
+  window.clearTimeout(serverRetryTimer);
+  serverRetryTimer = null;
   state = mergeState(state, serverState);
   state.serverOnline = true;
   state.activeRide = activeRide || findActiveRide(state.liveRides);
@@ -463,9 +470,12 @@ async function apiRequest(path, options = {}) {
     return parsed.body;
   }
 
+  const { headers = {}, ...fetchOptions } = options;
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
+    ...fetchOptions,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...headers },
   });
 
   const contentType = response.headers.get("content-type") || "";
@@ -478,6 +488,38 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
+function scheduleServerReconnect() {
+  if (window.TangamjaNativeApi || serverRetryTimer) return;
+  serverRetryTimer = window.setTimeout(async () => {
+    serverRetryTimer = null;
+    const wasOnline = state.serverOnline;
+    await hydrateFromServer({ silent: true });
+    if (!wasOnline && state.serverOnline) {
+      showToast("서버 API에 다시 연결되었습니다.");
+    }
+  }, SERVER_RETRY_DELAY);
+}
+
+function serverConnectionMessage(error) {
+  const detail = error?.message ? ` (${error.message})` : "";
+  if (location.protocol === "file:") {
+    return `로컬 서버 연결 대기 중입니다. localhost:4173 서버를 실행하면 자동 연결됩니다.${detail}`;
+  }
+  return `서버 API 연결을 재시도합니다.${detail}`;
+}
+
+function markServerOffline(error) {
+  const message = error?.message || "";
+  const isNetworkError =
+    error?.name === "TypeError" || message.includes("Failed to fetch") || message.includes("NetworkError");
+  if (!isNetworkError) return false;
+
+  state.serverOnline = false;
+  renderWebSummary();
+  scheduleServerReconnect();
+  return true;
+}
+
 async function mutateServer(path, body, successMessage) {
   try {
     const payload = await apiRequest(path, {
@@ -488,6 +530,7 @@ async function mutateServer(path, body, successMessage) {
     showToast(payload.message || successMessage);
     return payload;
   } catch (error) {
+    markServerOffline(error);
     showToast(error.message || "서버 처리 중 오류가 발생했습니다.");
     return null;
   }
@@ -741,17 +784,23 @@ function renderWebSummary() {
   const isNative = Boolean(window.TangamjaNativeApi);
   const isHttp = location.protocol === "http:" || location.protocol === "https:";
   const mode = isNative ? "APK 내부 실행" : isHttp ? "웹 서버 실행" : "파일 미리보기";
-  const serverText = isNative ? "내부 저장소" : state.serverOnline ? "API 연결됨" : isHttp ? "연결 대기" : "서버 필요";
+  const serverText = isNative
+    ? "내부 저장소"
+    : state.serverOnline
+      ? "API 연결됨"
+      : isHttp || API_ORIGIN
+        ? "연결 재시도"
+        : "서버 필요";
   const note = isNative
     ? "APK 안에서는 Android 내부 저장소와 Foreground Service가 웹앱 기능을 대신 처리합니다."
     : isHttp
       ? "현재 웹 서버 주소에서 정적 앱, API, PWA 캐시가 함께 동작합니다."
-      : "현재는 파일로 열린 상태입니다. 서버 저장과 PWA 기능은 localhost 웹 서버에서 열 때 활성화됩니다.";
+      : "파일로 열었지만 localhost:4173 서버가 실행 중이면 API 저장과 검증 데이터가 자동 연결됩니다.";
 
   const webUrl = document.querySelector(".web-actions a:first-child");
   const apiUrl = document.querySelector(".web-actions a:last-child");
   if (webUrl) webUrl.href = isHttp ? `${location.origin}/index.html?web=1` : "http://localhost:4173/index.html?web=1";
-  if (apiUrl) apiUrl.href = isHttp ? `${location.origin}/api/state` : "http://localhost:4173/api/state";
+  if (apiUrl) apiUrl.href = isHttp ? `${location.origin}/api/state` : `${API_ORIGIN || "http://localhost:4173"}/api/state`;
 
   const fields = [
     ["[data-web-mode]", mode],
@@ -993,6 +1042,14 @@ function renderVworldMap() {
   const layer = screen.querySelector("[data-vworld-tiles]");
   if (!board || !layer) return;
 
+  board.classList.add("api-fallback");
+  const status = board.querySelector("[data-map-api-status]");
+  if (status) status.textContent = "V-WORLD WMTS API";
+  renderVworldTileFallback(board, layer);
+  bindInteractiveMap(board);
+}
+
+function renderVworldTileFallback(board, layer) {
   const width = board.clientWidth || 360;
   const height = board.clientHeight || 280;
   const tileSize = VWORLD_MAP.tileSize;
@@ -1021,7 +1078,6 @@ function renderVworldMap() {
   }
 
   layer.replaceChildren(...tiles);
-  bindInteractiveMap(board);
 }
 
 function lonLatToWorldPixel(lng, lat, zoom, tileSize) {
@@ -1050,6 +1106,7 @@ function bindInteractiveMap(board) {
 
   board.addEventListener("pointerdown", (event) => {
     if (event.target.closest("button")) return;
+    if (board.classList.contains("api-ready") && event.target.closest("[data-vworld-api-map]")) return;
     board.setPointerCapture?.(event.pointerId);
     mapDrag = {
       pointerId: event.pointerId,
@@ -1316,18 +1373,97 @@ async function toggleRide() {
     return;
   }
 
+  const locationReady = await prepareRideLocation();
+  if (!locationReady) return;
+
   const payload = await mutateServer("/rides/start", { user: currentRiderName() }, "서버에 라이딩 세션을 시작했습니다.");
-  if (!payload?.activeRide) return;
+  if (!payload?.activeRide) {
+    pendingStartSample = null;
+    state.wakeStatus = "대기 중";
+    persistClientPrefs();
+    render();
+    return;
+  }
 
   state.activeRide = payload.activeRide;
   state.ride = rideFromSession(payload.activeRide);
   state.riding = true;
-  state.gpsStatus = "GPS 권한 요청 중";
+  state.gpsStatus = "GPS 기록 시작";
   persistClientPrefs();
   render();
+  if (pendingStartSample) {
+    sampleQueue.push(pendingStartSample);
+    pendingStartSample = null;
+    flushSamples();
+  }
   startLocalRideLoop();
   startLocationWatch();
   requestWakeLock();
+}
+
+async function prepareRideLocation() {
+  if (!("geolocation" in navigator)) {
+    state.permissions.location = "unsupported";
+    state.gpsStatus = "GPS 미지원";
+    persistClientPrefs();
+    render();
+    showToast("이 브라우저는 위치 기록을 지원하지 않습니다.");
+    return false;
+  }
+
+  if (navigator.permissions?.query) {
+    try {
+      const permission = await navigator.permissions.query({ name: "geolocation" });
+      state.permissions.location = permission.state;
+      if (permission.state === "denied") {
+        state.gpsStatus = "위치 권한 차단";
+        persistClientPrefs();
+        render();
+        openSettings();
+        showToast("위치 권한을 허용해야 라이딩 기록을 시작할 수 있습니다.");
+        return false;
+      }
+    } catch {
+      state.permissions.location = state.permissions.location || "prompt";
+    }
+  }
+
+  state.gpsStatus = "GPS 시작 위치 확인 중";
+  state.wakeStatus = "화면 꺼짐 준비 중";
+  persistClientPrefs();
+  render();
+
+  try {
+    const position = await getCurrentPositionOnce({
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+    pendingStartSample = createPositionSample(position);
+    state.permissions.location = "granted";
+    state.gpsStatus = pendingStartSample.accuracy
+      ? `GPS 준비 완료 ±${Math.round(pendingStartSample.accuracy)}m`
+      : "GPS 준비 완료";
+    persistClientPrefs();
+    render();
+    return true;
+  } catch (error) {
+    pendingStartSample = null;
+    state.permissions.location = error.code === 1 ? "denied" : "prompt";
+    state.gpsStatus = positionErrorMessage(error);
+    state.wakeStatus = "대기 중";
+    persistClientPrefs();
+    render();
+    if (error.code === 1) openSettings();
+    showToast(`${state.gpsStatus} 라이딩 시작을 중단했습니다.`);
+    return false;
+  }
+}
+
+function getCurrentPositionOnce(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
 }
 
 function startLocalRideLoop() {
@@ -1339,7 +1475,11 @@ function tickRide() {
   if (!state.activeRide?.startedAt) return;
   state.ride.seconds = Math.max(0, Math.round((Date.now() - new Date(state.activeRide.startedAt).getTime()) / 1000));
   persistClientPrefs();
-  renderHome();
+  if (state.tab === "home") {
+    renderHome();
+  } else {
+    renderWebSummary();
+  }
 }
 
 function startLocationWatch() {
@@ -1364,7 +1504,15 @@ function startLocationWatch() {
 }
 
 function handlePosition(position) {
-  const sample = {
+  const sample = createPositionSample(position);
+
+  state.gpsStatus = sample.accuracy ? `GPS 수신 중 ±${Math.round(sample.accuracy)}m` : "GPS 수신 중";
+  sampleQueue.push(sample);
+  flushSamples();
+}
+
+function createPositionSample(position) {
+  return {
     lat: position.coords.latitude,
     lng: position.coords.longitude,
     accuracy: position.coords.accuracy,
@@ -1373,21 +1521,21 @@ function handlePosition(position) {
     speed: position.coords.speed,
     timestamp: new Date(position.timestamp).toISOString(),
   };
-
-  state.gpsStatus = sample.accuracy ? `GPS 수신 중 ±${Math.round(sample.accuracy)}m` : "GPS 수신 중";
-  sampleQueue.push(sample);
-  flushSamples();
 }
 
 function handlePositionError(error) {
+  state.gpsStatus = positionErrorMessage(error);
+  render();
+  showToast(state.gpsStatus);
+}
+
+function positionErrorMessage(error) {
   const messages = {
     1: "위치 권한이 거부되었습니다.",
     2: "현재 위치를 확인할 수 없습니다.",
     3: "GPS 응답 시간이 초과되었습니다.",
   };
-  state.gpsStatus = messages[error.code] || "GPS 오류";
-  render();
-  showToast(state.gpsStatus);
+  return messages[error.code] || "GPS 오류";
 }
 
 async function flushSamples() {
@@ -1401,6 +1549,7 @@ async function flushSamples() {
     });
     applyServerState(payload.state, payload.activeRide);
   } catch (error) {
+    markServerOffline(error);
     sampleQueue = samples.concat(sampleQueue).slice(-40);
     window.clearTimeout(sampleFlushTimer);
     sampleFlushTimer = window.setTimeout(flushSamples, 5000);
@@ -1473,6 +1622,7 @@ async function finishRide() {
     applyServerState(payload.state);
     showToast(payload.message || "라이딩 기록이 서버에 최종 등록됐습니다.");
   } catch (error) {
+    markServerOffline(error);
     showToast(error.message || "라이딩 종료 처리 중 오류가 발생했습니다.");
   }
 }
@@ -1636,6 +1786,7 @@ async function reviewRequest(id, status) {
     applyServerState(payload.state);
     showToast(payload.message || (status === "approved" ? "검증을 승인했습니다." : "검증 요청을 반려했습니다."));
   } catch (error) {
+    markServerOffline(error);
     showToast(error.message || "검증 처리 중 오류가 발생했습니다.");
   }
 }
