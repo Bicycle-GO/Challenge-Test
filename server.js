@@ -5,29 +5,32 @@ const path = require("node:path");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
-const SERVER_DIR = path.join(ROOT, "server");
+const SERVER_DIR = process.env.TANGAMJA_SERVER_DIR || "/Users/yangjimin/Documents/server/Challenge-test-server";
 const DATA_DIR = path.join(SERVER_DIR, "data");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
+const PROJECT_SERVER_DIR = path.join(ROOT, "server");
 const LEGACY_DATA_DIR = path.join(ROOT, "data");
+const PROJECT_STATE_FILE = path.join(PROJECT_SERVER_DIR, "data", "state.json");
 const LEGACY_STATE_FILE = path.join(LEGACY_DATA_DIR, "state.json");
 const QR_IMAGE_DIR = path.join(SERVER_DIR, "qr-images");
+const PROJECT_QR_IMAGE_DIR = path.join(PROJECT_SERVER_DIR, "qr-images");
 const LEGACY_QR_IMAGE_DIR = path.join(LEGACY_DATA_DIR, "qr-images");
 const PROOF_DIR = path.join(SERVER_DIR, "proofs");
-const QR_IMAGE_SEARCH_DIRS = [QR_IMAGE_DIR, LEGACY_QR_IMAGE_DIR];
+const QR_IMAGE_SEARCH_DIRS = [QR_IMAGE_DIR, PROJECT_QR_IMAGE_DIR, LEGACY_QR_IMAGE_DIR];
 const CO2_PER_KM = 0.192;
 const POINTS_PER_CO2_KG = 100;
 const EARTH_RADIUS_KM = 6371;
 const MAX_SAMPLE_COUNT = 1200;
 const MAX_QR_FRAME_PIXELS = 900_000;
 const { OFFICIAL_LANDMARKS: landmarks } = require("./landmark-data.js");
-const jsQR = require("./server/vendor/jsQR.js");
+const jsQR = loadQrDecoder();
 
 const defaultQrCodes = [
   {
     id: "jeonju-3-1-birthplace",
     landmarkName: "전주3.1운동발상지",
     payload: "TANGAMJA:CHECKIN:JEONJU-3-1-MOVEMENT-BIRTHPLACE:v1",
-    imagePath: "server/qr-images/전주3.1운동발상지.svg",
+    imagePath: path.join(QR_IMAGE_DIR, "전주3.1운동발상지.svg"),
     status: "active",
     radiusMeters: 100,
     description: "전주3.1운동발상지 현장 게시용 방문 인증 QR",
@@ -114,6 +117,23 @@ server.listen(PORT, () => {
   console.log(`Tangamja server running at http://localhost:${PORT}`);
 });
 
+function loadQrDecoder() {
+  const decoderPaths = [
+    path.join(SERVER_DIR, "vendor", "jsQR.js"),
+    path.join(PROJECT_SERVER_DIR, "vendor", "jsQR.js"),
+  ];
+
+  for (const decoderPath of decoderPaths) {
+    try {
+      return require(decoderPath);
+    } catch {
+      // Try the next configured decoder location.
+    }
+  }
+
+  throw new Error(`QR 디코더를 찾을 수 없습니다. ${path.join(SERVER_DIR, "vendor", "jsQR.js")} 파일을 확인해주세요.`);
+}
+
 async function handleApi(request, response) {
   setApiHeaders(response);
   if (request.method === "OPTIONS") {
@@ -127,9 +147,10 @@ async function handleApi(request, response) {
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, 200, {
       ok: true,
-      stateFile: path.relative(ROOT, STATE_FILE),
-      qrImageFolders: QR_IMAGE_SEARCH_DIRS.map((folder) => path.relative(ROOT, folder)),
-      proofFolder: path.relative(ROOT, PROOF_DIR),
+      serverRoot: SERVER_DIR,
+      stateFile: STATE_FILE,
+      qrImageFolders: QR_IMAGE_SEARCH_DIRS,
+      proofFolder: PROOF_DIR,
     });
     return;
   }
@@ -630,7 +651,7 @@ async function validateQrCapture(qrCode, body) {
     storedImagePath = await resolveQrImagePath(qrCode);
     storedImageHash = await hashFile(storedImagePath);
   } catch {
-    return { ok: false, error: "서버에 등록된 QR 이미지 파일을 찾지 못했습니다. server/qr-images 폴더를 확인해주세요." };
+    return { ok: false, error: `서버에 등록된 QR 이미지 파일을 찾지 못했습니다. ${QR_IMAGE_DIR} 폴더를 확인해주세요.` };
   }
 
   return {
@@ -776,13 +797,15 @@ async function readState() {
     const raw = await fs.readFile(STATE_FILE, "utf8");
     return normalizeState(JSON.parse(raw));
   } catch {
-    try {
-      const raw = await fs.readFile(LEGACY_STATE_FILE, "utf8");
-      const state = normalizeState(JSON.parse(raw));
-      await writeState(state);
-      return state;
-    } catch {
-      // Fall through to a fresh server state.
+    for (const fallbackFile of [PROJECT_STATE_FILE, LEGACY_STATE_FILE]) {
+      try {
+        const raw = await fs.readFile(fallbackFile, "utf8");
+        const state = normalizeState(JSON.parse(raw));
+        await writeState(state);
+        return state;
+      } catch {
+        // Try the next known state location.
+      }
     }
 
     const state = structuredClone(defaultState);
