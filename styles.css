@@ -926,6 +926,10 @@ dd {
   user-select: none;
 }
 
+.vworld-tile-layer img.tile-overlay {
+  z-index: 1;
+}
+
 .vworld-attribution {
   position: absolute;
   right: 8px;
@@ -967,6 +971,17 @@ dd {
   gap: 6px;
 }
 
+.map-layer-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(8, 61, 155, 0.14);
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 14px rgba(7, 28, 88, 0.1);
+}
+
 .map-controls button {
   width: 34px;
   height: 34px;
@@ -977,6 +992,24 @@ dd {
   box-shadow: 0 8px 14px rgba(7, 28, 88, 0.12);
   font-size: 1.15rem;
   font-weight: 950;
+}
+
+.map-controls .map-layer-toggle button {
+  width: auto;
+  height: 28px;
+  min-width: 42px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 99px;
+  box-shadow: none;
+  color: var(--ink);
+  background: transparent;
+  font-size: 0.68rem;
+}
+
+.map-controls .map-layer-toggle button.active {
+  color: white;
+  background: var(--blue);
 }
 
 .map-crosshair {
@@ -1044,6 +1077,16 @@ dd {
 
 .map-pin.active {
   background: var(--blue);
+}
+
+.map-pin {
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  white-space: nowrap;
+  translate: -50% -100%;
+}
+
+.map-pin.estimated {
+  border-style: dashed;
 }
 
 .p1 {
@@ -1235,10 +1278,13 @@ dd {
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
+  width: 100%;
   padding: 9px;
   border: 1px solid #d9e6f8;
   border-radius: var(--radius);
+  color: inherit;
   background: rgba(255, 255, 255, 0.8);
+  text-align: left;
 }
 
 .official-landmark-card > span {
@@ -1280,6 +1326,11 @@ dd {
 .official-landmark-card.priority em {
   color: #8a5411;
   background: #fff1c8;
+}
+
+.official-landmark-card[aria-pressed="true"] {
+  border-color: rgba(15, 91, 216, 0.48);
+  background: linear-gradient(135deg, rgba(232, 244, 255, 0.96), rgba(255, 255, 255, 0.9));
 }
 
 .points-hero {

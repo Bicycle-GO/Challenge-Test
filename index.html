@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=vworld-quiet-server-1" />
+    <link rel="stylesheet" href="styles.css?v=vworld-layer-select-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -386,15 +386,15 @@
         <div class="vworld-api-map" data-vworld-api-map aria-hidden="true"></div>
         <div class="vworld-tile-layer" data-vworld-tiles aria-hidden="true"></div>
         <div class="map-controls" aria-label="지도 조작">
+          <div class="map-layer-toggle" aria-label="지도 배경 선택">
+            <button type="button" data-map-layer="base" aria-pressed="true">일반</button>
+            <button type="button" data-map-layer="satellite" aria-pressed="false">항공</button>
+          </div>
           <button type="button" data-action="map-zoom-in" aria-label="지도 확대">+</button>
           <button type="button" data-action="map-zoom-out" aria-label="지도 축소">−</button>
         </div>
         <span class="map-crosshair" aria-hidden="true">+</span>
-        <button class="map-pin p1" type="button" data-landmark="0">고창 선운사</button>
-        <button class="map-pin p2" type="button" data-landmark="1">덕유산</button>
-        <button class="map-pin p3" type="button" data-landmark="2">전주 한옥마을</button>
-        <button class="map-pin p4" type="button" data-landmark="3">군산 근대역사거리</button>
-        <button class="map-pin p5" type="button" data-landmark="4">익산 미륵사지</button>
+        <div class="map-pins" data-map-pins></div>
         <button class="bike-position" type="button" data-action="move-near">현재 위치</button>
         <span class="map-hint">드래그하여 이동 · +/- 확대</span>
         <span class="map-api-status" data-map-api-status>V-WORLD WMTS API</span>
@@ -467,7 +467,7 @@
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="landmark-data.js?v=vworld-quiet-server-1"></script>
-    <script src="app.js?v=vworld-quiet-server-1" type="module"></script>
+    <script src="landmark-data.js?v=vworld-layer-select-1"></script>
+    <script src="app.js?v=vworld-layer-select-1" type="module"></script>
   </body>
 </html>

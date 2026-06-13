@@ -7,9 +7,22 @@ const SERVER_RETRY_DELAY = 5000;
 const VWORLD_API_KEY = "E958994F-358D-38D8-8F2C-9C44597086CF";
 const VWORLD_MAP = {
   center: { lat: 35.72, lng: 127.14 },
-  layer: "Base",
+  layer: "base",
   tileSize: 256,
   zoom: 8,
+};
+const VWORLD_LAYERS = {
+  base: {
+    label: "일반지도",
+    tiles: [{ name: "Base", extension: "png" }],
+  },
+  satellite: {
+    label: "항공사진",
+    tiles: [
+      { name: "Satellite", extension: "jpeg" },
+      { name: "Hybrid", extension: "png", overlay: true },
+    ],
+  },
 };
 
 const initialState = {
@@ -41,6 +54,7 @@ const initialState = {
   map: {
     center: { ...VWORLD_MAP.center },
     zoom: VWORLD_MAP.zoom,
+    layer: VWORLD_MAP.layer,
   },
   ride: {
     seconds: 0,
@@ -417,6 +431,7 @@ async function hydrateFromServer({ silent = false } = {}) {
       requestWakeLock();
       return;
     }
+    if (!silent) showToast("서버 데이터와 연결되었습니다.");
   } catch (error) {
     state.serverOnline = false;
     render();
@@ -986,9 +1001,12 @@ function renderOfficialDirectory() {
   );
 
   list.replaceChildren(
-    ...landmarks.map((landmark) => {
-      const element = document.createElement("article");
+    ...landmarks.map((landmark, index) => {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.dataset.officialLandmark = String(index);
       element.className = `official-landmark-card ${landmark.sourceLevel === "kto100" ? "priority" : ""}`;
+      element.setAttribute("aria-pressed", String(index === state.selectedLandmark));
       element.innerHTML = `
         <span>${landmark.rank}</span>
         <div>
@@ -1020,7 +1038,7 @@ function formatLandmarkPinName(name) {
     .replace("국립공원", "")
     .replace("도립공원", "")
     .replace("군립공원", "")
-    .replace("전주", "전주 ")
+    .replace(/^전주(?!\s)/, "전주 ")
     .trim();
 }
 
@@ -1029,15 +1047,22 @@ function renderVworldMap() {
   const layer = screen.querySelector("[data-vworld-tiles]");
   if (!board || !layer) return;
 
+  const layerConfig = currentMapLayer();
   board.classList.remove("api-error");
   board.classList.add("api-fallback");
   const status = board.querySelector("[data-map-api-status]");
-  if (status) status.textContent = "V-WORLD 타일 연결 중";
-  renderVworldTileFallback(board, layer);
+  if (status) status.textContent = `V-WORLD ${layerConfig.label} 연결 중`;
+  board.querySelectorAll("[data-map-layer]").forEach((button) => {
+    const active = button.dataset.mapLayer === state.map.layer;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  renderVworldTileFallback(board, layer, layerConfig);
+  renderMapPins(board);
   bindInteractiveMap(board);
 }
 
-function renderVworldTileFallback(board, layer) {
+function renderVworldTileFallback(board, layer, layerConfig) {
   const width = board.clientWidth || 360;
   const height = board.clientHeight || 280;
   const tileSize = VWORLD_MAP.tileSize;
@@ -1058,7 +1083,7 @@ function renderVworldTileFallback(board, layer) {
   const updateTileStatus = () => {
     if (!status) return;
     if (loadedTiles > 0) {
-      status.textContent = `V-WORLD 실시간 지도 · z${zoom}`;
+      status.textContent = `V-WORLD ${layerConfig.label} · z${zoom}`;
       board.classList.remove("api-error");
       return;
     }
@@ -1068,39 +1093,102 @@ function renderVworldTileFallback(board, layer) {
     }
   };
 
-  for (let x = centerTileX - halfTilesX; x <= centerTileX + halfTilesX; x += 1) {
-    for (let y = centerTileY - halfTilesY; y <= centerTileY + halfTilesY; y += 1) {
-      if (y < 0 || y >= 2 ** zoom) continue;
-      const image = document.createElement("img");
-      image.alt = "";
-      image.decoding = "async";
-      image.loading = "lazy";
-      image.referrerPolicy = "no-referrer";
-      image.src = vworldTileUrl(x, y, zoom);
-      image.addEventListener(
-        "load",
-        () => {
-          loadedTiles += 1;
-          updateTileStatus();
-        },
-        { once: true },
-      );
-      image.addEventListener(
-        "error",
-        () => {
-          failedTiles += 1;
-          updateTileStatus();
-        },
-        { once: true },
-      );
-      image.style.left = `${Math.round(offsetX + (x - centerTileX) * tileSize)}px`;
-      image.style.top = `${Math.round(offsetY + (y - centerTileY) * tileSize)}px`;
-      tiles.push(image);
-      expectedTiles += 1;
+  for (const tileLayer of layerConfig.tiles) {
+    for (let x = centerTileX - halfTilesX; x <= centerTileX + halfTilesX; x += 1) {
+      for (let y = centerTileY - halfTilesY; y <= centerTileY + halfTilesY; y += 1) {
+        if (y < 0 || y >= 2 ** zoom) continue;
+        const image = document.createElement("img");
+        image.alt = "";
+        image.decoding = "async";
+        image.loading = "lazy";
+        image.referrerPolicy = "no-referrer";
+        image.className = tileLayer.overlay ? "tile-overlay" : "";
+        image.src = vworldTileUrl(x, y, zoom, tileLayer);
+        image.addEventListener(
+          "load",
+          () => {
+            loadedTiles += 1;
+            updateTileStatus();
+          },
+          { once: true },
+        );
+        image.addEventListener(
+          "error",
+          () => {
+            failedTiles += 1;
+            updateTileStatus();
+          },
+          { once: true },
+        );
+        image.style.left = `${Math.round(offsetX + (x - centerTileX) * tileSize)}px`;
+        image.style.top = `${Math.round(offsetY + (y - centerTileY) * tileSize)}px`;
+        tiles.push(image);
+        expectedTiles += 1;
+      }
     }
   }
 
   layer.replaceChildren(...tiles);
+}
+
+function renderMapPins(board) {
+  const container = board.querySelector("[data-map-pins]");
+  if (!container) return;
+
+  const width = board.clientWidth || 360;
+  const height = board.clientHeight || 280;
+  const selected = landmarks[state.selectedLandmark] || landmarks[0];
+  const pinLandmarks = nearbyMapLandmarks(selected);
+  const pins = [];
+
+  pinLandmarks.forEach(({ landmark, index }) => {
+    const point = projectLandmarkToBoard(landmark, width, height);
+    if (!point.visible && index !== state.selectedLandmark) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.landmark = String(index);
+    button.className = `map-pin ${index === state.selectedLandmark ? "active" : ""} ${landmark.coordinateLevel === "city-estimate" ? "estimated" : ""}`;
+    button.textContent = formatLandmarkPinName(landmark.name);
+    button.style.left = `${Math.max(24, Math.min(width - 24, point.x))}px`;
+    button.style.top = `${Math.max(44, Math.min(height - 16, point.y))}px`;
+    pins.push(button);
+  });
+
+  container.replaceChildren(...pins);
+}
+
+function nearbyMapLandmarks(selected) {
+  const selectedIndex = landmarks.indexOf(selected);
+  return landmarks
+    .map((landmark, index) => ({
+      landmark,
+      index,
+      score:
+        index === selectedIndex
+          ? -10
+          : landmark.city === selected.city
+            ? 0
+            : landmark.category === selected.category
+              ? 1
+              : 2,
+    }))
+    .sort((a, b) => a.score - b.score || a.landmark.rank - b.landmark.rank)
+    .slice(0, 8);
+}
+
+function projectLandmarkToBoard(landmark, width, height) {
+  const tileSize = VWORLD_MAP.tileSize;
+  const zoom = state.map.zoom;
+  const center = lonLatToWorldPixel(state.map.center.lng, state.map.center.lat, zoom, tileSize);
+  const point = lonLatToWorldPixel(landmark.lng, landmark.lat, zoom, tileSize);
+  const x = width / 2 + point.x - center.x;
+  const y = height / 2 + point.y - center.y;
+  return {
+    x,
+    y,
+    visible: x >= -80 && x <= width + 80 && y >= -80 && y <= height + 80,
+  };
 }
 
 function lonLatToWorldPixel(lng, lat, zoom, tileSize) {
@@ -1172,10 +1260,14 @@ function updateMapZoom(delta) {
   render();
 }
 
-function vworldTileUrl(x, y, zoom) {
+function currentMapLayer() {
+  return VWORLD_LAYERS[state.map.layer] || VWORLD_LAYERS.base;
+}
+
+function vworldTileUrl(x, y, zoom, tileLayer = currentMapLayer().tiles[0]) {
   const tileCount = 2 ** zoom;
   const wrappedX = ((x % tileCount) + tileCount) % tileCount;
-  return `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_API_KEY}/${VWORLD_MAP.layer}/${zoom}/${y}/${wrappedX}.png`;
+  return `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_API_KEY}/${tileLayer.name}/${zoom}/${y}/${wrappedX}.${tileLayer.extension}`;
 }
 
 function renderMap() {
@@ -1220,14 +1312,23 @@ function renderMap() {
 
   screen.querySelectorAll("[data-landmark]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.selectedLandmark = Number(button.dataset.landmark);
-      state.isNearLandmark = false;
-      persistClientPrefs();
-      render();
+      selectLandmark(Number(button.dataset.landmark));
     });
   });
 
   renderOfficialDirectory();
+}
+
+function selectLandmark(index) {
+  const landmark = landmarks[index];
+  if (!landmark) return;
+
+  state.selectedLandmark = index;
+  state.isNearLandmark = false;
+  state.map.center = { lat: landmark.lat, lng: landmark.lng };
+  state.map.zoom = Math.max(state.map.zoom, landmark.coordinateLevel === "exact" ? 13 : 11);
+  persistClientPrefs();
+  render();
 }
 
 function renderServerQrCard(landmark) {
@@ -1373,6 +1474,18 @@ document.addEventListener("click", (event) => {
 
   if (target.dataset.action === "map-zoom-out") {
     updateMapZoom(-1);
+    return;
+  }
+
+  if (target.dataset.mapLayer) {
+    state.map.layer = target.dataset.mapLayer in VWORLD_LAYERS ? target.dataset.mapLayer : VWORLD_MAP.layer;
+    persistClientPrefs();
+    render();
+    return;
+  }
+
+  if (target.dataset.officialLandmark) {
+    selectLandmark(Number(target.dataset.officialLandmark));
     return;
   }
 

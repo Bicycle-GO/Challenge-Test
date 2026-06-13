@@ -3,6 +3,38 @@ const OFFICIAL_LANDMARK_SOURCE = {
   tourJeonbuk: "투어전북 전북문화관광 관광지정보",
 };
 
+const JEONBUK_CITY_COORDS = {
+  전주: { lat: 35.8242, lng: 127.148 },
+  군산: { lat: 35.9676, lng: 126.7369 },
+  익산: { lat: 35.9483, lng: 126.9576 },
+  정읍: { lat: 35.5699, lng: 126.856 },
+  남원: { lat: 35.4164, lng: 127.3904 },
+  김제: { lat: 35.8036, lng: 126.8809 },
+  완주: { lat: 35.9047, lng: 127.1621 },
+  진안: { lat: 35.7917, lng: 127.4249 },
+  무주: { lat: 36.0068, lng: 127.6608 },
+  장수: { lat: 35.6473, lng: 127.5215 },
+  임실: { lat: 35.6178, lng: 127.2891 },
+  순창: { lat: 35.3745, lng: 127.1374 },
+  고창: { lat: 35.4358, lng: 126.7021 },
+  부안: { lat: 35.7316, lng: 126.7335 },
+};
+
+function coordinateForSpot(spot, index) {
+  if (Number.isFinite(spot.lat) && Number.isFinite(spot.lng)) {
+    return { lat: spot.lat, lng: spot.lng, coordinateLevel: "exact" };
+  }
+
+  const base = JEONBUK_CITY_COORDS[spot.city] || { lat: 35.72, lng: 127.14 };
+  const ring = (index % 9) - 4;
+  const row = (Math.floor(index / 9) % 7) - 3;
+  return {
+    lat: Number((base.lat + row * 0.018).toFixed(6)),
+    lng: Number((base.lng + ring * 0.022).toFixed(6)),
+    coordinateLevel: "city-estimate",
+  };
+}
+
 const OFFICIAL_LANDMARKS = [
   { name: "전주한옥마을", city: "전주", category: "역사·문화", sourceLevel: "kto100" },
   {
@@ -117,15 +149,19 @@ const OFFICIAL_LANDMARKS = [
   { name: "내소사", city: "부안", category: "역사·문화", sourceLevel: "tourJeonbuk" },
   { name: "직소폭포", city: "부안", category: "자연", sourceLevel: "tourJeonbuk" },
   { name: "부안청자박물관", city: "부안", category: "문화관광", sourceLevel: "tourJeonbuk" },
-].map((spot, index) => ({
-  id: `JB-${String(index + 1).padStart(3, "0")}`,
-  rank: index + 1,
-  bonus: spot.sourceLevel === "kto100" ? 220 : 140 + (index % 5) * 10,
-  near: 100,
-  distance: Number((7.5 + (index % 15) * 1.1).toFixed(1)),
-  officialSource: OFFICIAL_LANDMARK_SOURCE[spot.sourceLevel],
-  ...spot,
-}));
+].map((spot, index) => {
+  const coordinate = coordinateForSpot(spot, index);
+  return {
+    id: `JB-${String(index + 1).padStart(3, "0")}`,
+    rank: index + 1,
+    bonus: spot.sourceLevel === "kto100" ? 220 : 140 + (index % 5) * 10,
+    near: 100,
+    distance: Number((7.5 + (index % 15) * 1.1).toFixed(1)),
+    officialSource: OFFICIAL_LANDMARK_SOURCE[spot.sourceLevel],
+    ...spot,
+    ...coordinate,
+  };
+});
 
 if (typeof window !== "undefined") {
   window.OFFICIAL_LANDMARKS = OFFICIAL_LANDMARKS;
