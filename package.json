@@ -5,7 +5,7 @@
   "description": "자전거 챌린지와 탄소포인트를 연결한 서버형 PWA 프로토타입",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js && node --check 'api/[...path].js'",
+    "check": "node --check app.js && node --check server.js && find api -name '*.js' -print0 | xargs -0 -n1 node --check",
     "android:sync": "node scripts/sync-android-assets.mjs",
     "android:apk": "node scripts/build-android-debug.mjs"
   }
