@@ -5,20 +5,29 @@ const path = require("node:path");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, "data");
+const SERVER_DIR = path.join(ROOT, "server");
+const DATA_DIR = path.join(SERVER_DIR, "data");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
+const LEGACY_DATA_DIR = path.join(ROOT, "data");
+const LEGACY_STATE_FILE = path.join(LEGACY_DATA_DIR, "state.json");
+const QR_IMAGE_DIR = path.join(SERVER_DIR, "qr-images");
+const LEGACY_QR_IMAGE_DIR = path.join(LEGACY_DATA_DIR, "qr-images");
+const PROOF_DIR = path.join(SERVER_DIR, "proofs");
+const QR_IMAGE_SEARCH_DIRS = [QR_IMAGE_DIR, LEGACY_QR_IMAGE_DIR];
 const CO2_PER_KM = 0.192;
 const POINTS_PER_CO2_KG = 100;
 const EARTH_RADIUS_KM = 6371;
 const MAX_SAMPLE_COUNT = 1200;
+const MAX_QR_FRAME_PIXELS = 900_000;
 const { OFFICIAL_LANDMARKS: landmarks } = require("./landmark-data.js");
+const jsQR = require("./server/vendor/jsQR.js");
 
 const defaultQrCodes = [
   {
     id: "jeonju-3-1-birthplace",
     landmarkName: "전주3.1운동발상지",
     payload: "TANGAMJA:CHECKIN:JEONJU-3-1-MOVEMENT-BIRTHPLACE:v1",
-    imagePath: "data/qr-images/전주3.1운동발상지.svg",
+    imagePath: "server/qr-images/전주3.1운동발상지.svg",
     status: "active",
     radiusMeters: 100,
     description: "전주3.1운동발상지 현장 게시용 방문 인증 QR",
@@ -116,7 +125,12 @@ async function handleApi(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
-    sendJson(response, 200, { ok: true, stateFile: path.relative(ROOT, STATE_FILE) });
+    sendJson(response, 200, {
+      ok: true,
+      stateFile: path.relative(ROOT, STATE_FILE),
+      qrImageFolders: QR_IMAGE_SEARCH_DIRS.map((folder) => path.relative(ROOT, folder)),
+      proofFolder: path.relative(ROOT, PROOF_DIR),
+    });
     return;
   }
 
@@ -399,9 +413,15 @@ async function saveCheckin(response, body) {
 
   const state = await readState();
   const qrCode = findQrCodeForLandmark(state, landmark);
-  const scannedValue = normalizeQrPayload(body.qrValue || body.landmark?.qrValue || "");
-  if (qrCode && scannedValue !== normalizeQrPayload(qrCode.payload)) {
-    sendJson(response, 422, { error: `${landmark.name}에 등록된 서버 QR 이미지와 일치하지 않습니다.` });
+  const qrValidation = await validateQrCapture(qrCode, body);
+  if (!qrValidation.ok) {
+    sendJson(response, 422, { error: qrValidation.error });
+    return;
+  }
+
+  const locationValidation = validateCheckinLocation(landmark, qrCode, body.location || body.landmark?.location);
+  if (!locationValidation.ok) {
+    sendJson(response, 422, { error: locationValidation.error, location: locationValidation });
     return;
   }
 
@@ -413,7 +433,9 @@ async function saveCheckin(response, body) {
     user: body.user || "테스트 라이더",
     landmark,
     qrCode,
-    scannedValue,
+    scannedValue: qrValidation.decodedValue,
+    qrValidation,
+    locationValidation,
     points,
     co2,
     scannedAt,
@@ -446,15 +468,16 @@ async function saveCheckin(response, body) {
     proofId: proof.id,
     qrCodeId: qrCode?.id || "legacy-qr",
     evidence: qrCode
-      ? `서버 저장 QR(${qrCode.id}) payload 일치, GPS 반경 ${landmark.near}m, 방문 증명 ${proof.id}`
+      ? `서버 QR 이미지(${qrCode.id})와 촬영 프레임 일치, 기준점 ${locationValidation.distanceMeters}m, 방문 증명 ${proof.id}`
       : `GPS 반경 ${landmark.near}m, QR 스캔 성공, 중복 여부 서버 확인`,
   });
 
+  await writeProofArtifact(proof, { qrValidation, locationValidation });
   trimCollections(state);
   await writeState(state);
   sendJson(response, 201, {
     message: qrCode
-      ? `${landmark.name} 서버 QR이 일치하여 방문 인증이 저장됐습니다.`
+      ? `${landmark.name} 서버 QR 이미지와 위치가 일치하여 방문 인증이 저장됐습니다.`
       : "QR 체크인이 서버에 저장되고 보너스 포인트가 적립됐습니다.",
     state,
     proof,
@@ -535,6 +558,12 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (relativePath === "server" || relativePath.startsWith(`server${path.sep}`)) {
+    response.writeHead(403);
+    response.end("Forbidden");
+    return;
+  }
+
   try {
     const file = await fs.readFile(filePath);
     const contentType = mimeTypes[path.extname(filePath)] || "application/octet-stream";
@@ -557,14 +586,8 @@ async function serveQrImage(response, id) {
     return;
   }
 
-  const imagePath = path.normalize(path.join(ROOT, qrCode.imagePath));
-  const relativePath = path.relative(ROOT, imagePath);
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    sendJson(response, 403, { error: "QR 이미지 경로가 허용되지 않습니다." });
-    return;
-  }
-
   try {
+    const imagePath = await resolveQrImagePath(qrCode);
     const image = await fs.readFile(imagePath);
     response.writeHead(200, {
       "Content-Type": "image/svg+xml; charset=utf-8",
@@ -576,12 +599,192 @@ async function serveQrImage(response, id) {
   }
 }
 
+async function validateQrCapture(qrCode, body) {
+  if (!qrCode) {
+    const fallbackValue = normalizeQrPayload(body.qrValue || body.landmark?.qrValue || "");
+    if (!fallbackValue) return { ok: false, error: "QR 촬영 정보가 전달되지 않았습니다." };
+    return { ok: true, mode: "legacy-client-qr", decodedValue: fallbackValue };
+  }
+
+  const frame = normalizeQrFrame(body.qrFrame || body.landmark?.qrFrame);
+  if (!frame.ok) return { ok: false, error: frame.error };
+
+  const decodedValue = decodeQrFrame(frame);
+  if (!decodedValue) {
+    return { ok: false, error: "서버가 촬영 이미지에서 QR을 직접 판독하지 못했습니다. QR을 화면 중앙에 크게 맞춰 다시 스캔해주세요." };
+  }
+
+  const expectedValue = normalizeQrPayload(qrCode.payload);
+  if (decodedValue !== expectedValue) {
+    return { ok: false, error: "촬영한 QR 이미지가 서버에 등록된 QR 이미지와 일치하지 않습니다." };
+  }
+
+  const clientValue = normalizeQrPayload(body.qrValue || body.landmark?.qrValue || "");
+  if (clientValue && clientValue !== decodedValue) {
+    return { ok: false, error: "앱에서 읽은 QR 값과 서버가 촬영 이미지에서 판독한 값이 다릅니다. 다시 스캔해주세요." };
+  }
+
+  let storedImagePath;
+  let storedImageHash;
+  try {
+    storedImagePath = await resolveQrImagePath(qrCode);
+    storedImageHash = await hashFile(storedImagePath);
+  } catch {
+    return { ok: false, error: "서버에 등록된 QR 이미지 파일을 찾지 못했습니다. server/qr-images 폴더를 확인해주세요." };
+  }
+
+  return {
+    ok: true,
+    mode: "server-frame-qr",
+    decodedValue,
+    frameHash: hashBuffer(frame.rgba),
+    frameSize: `${frame.width}x${frame.height}`,
+    storedImageHash,
+    storedImagePath: path.relative(ROOT, storedImagePath),
+  };
+}
+
+function normalizeQrFrame(frame) {
+  if (!frame || typeof frame !== "object") {
+    return { ok: false, error: "서버 판정을 위한 QR 촬영 이미지가 전달되지 않았습니다." };
+  }
+
+  const width = Math.round(Number(frame.width));
+  const height = Math.round(Number(frame.height));
+  const rgbaBase64 = String(frame.rgbaBase64 || "");
+  const pixels = width * height;
+
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 80 || height < 80) {
+    return { ok: false, error: "QR 촬영 이미지 크기가 너무 작습니다. 다시 스캔해주세요." };
+  }
+
+  if (pixels > MAX_QR_FRAME_PIXELS) {
+    return { ok: false, error: "QR 촬영 이미지가 너무 큽니다. 다시 스캔해주세요." };
+  }
+
+  const rgba = Buffer.from(rgbaBase64, "base64");
+  if (rgba.length !== pixels * 4) {
+    return { ok: false, error: "QR 촬영 이미지 데이터가 올바르지 않습니다." };
+  }
+
+  return { ok: true, width, height, rgba };
+}
+
+function decodeQrFrame(frame) {
+  const data = new Uint8ClampedArray(frame.rgba.buffer, frame.rgba.byteOffset, frame.rgba.byteLength);
+  const result = jsQR(data, frame.width, frame.height, { inversionAttempts: "attemptBoth" });
+  return normalizeQrPayload(result?.data || "");
+}
+
+function validateCheckinLocation(landmark, qrCode, location) {
+  const target = normalizeLocation({ lat: landmark.lat, lng: landmark.lng });
+  if (!target) {
+    return { ok: true, mode: "location-not-configured", distanceMeters: null };
+  }
+
+  const current = normalizeLocation(location);
+  if (!current) {
+    return { ok: false, error: "현재 GPS 좌표가 서버에 전달되지 않았습니다. 위치 권한을 허용한 뒤 다시 스캔해주세요." };
+  }
+
+  const accuracy = Number.isFinite(Number(location?.accuracy)) ? Math.max(0, Number(location.accuracy)) : null;
+  if (accuracy !== null && accuracy > 100) {
+    return { ok: false, error: `GPS 정확도가 낮습니다(±${Math.round(accuracy)}m). 잠시 후 야외에서 다시 스캔해주세요.` };
+  }
+
+  const distanceMeters = round(haversineKm(target, current) * 1000, 1);
+  const radiusMeters = Math.max(1, Number(qrCode?.radiusMeters || landmark.near || 100));
+  const acceptedRadius = radiusMeters + Math.min(50, accuracy || 0);
+  const ok = distanceMeters <= acceptedRadius;
+
+  return {
+    ok,
+    mode: "gps-radius",
+    lat: current.lat,
+    lng: current.lng,
+    targetLat: target.lat,
+    targetLng: target.lng,
+    accuracy,
+    distanceMeters,
+    radiusMeters,
+    acceptedRadius: round(acceptedRadius, 1),
+    error: ok ? "" : `${landmark.name} 기준 위치에서 ${distanceMeters}m 떨어져 있어 인증 반경 ${Math.round(acceptedRadius)}m를 벗어났습니다.`,
+  };
+}
+
+function normalizeLocation(location) {
+  if (!location || typeof location !== "object") return null;
+  const lat = Number(location.lat ?? location.latitude);
+  const lng = Number(location.lng ?? location.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+async function resolveQrImagePath(qrCode) {
+  const candidates = [];
+  const imagePath = String(qrCode.imagePath || "").trim();
+  const basename = imagePath ? path.basename(imagePath) : "";
+  const candidateNames = [...new Set([basename, `${qrCode.id}.svg`, `${qrCode.landmarkName}.svg`].filter(Boolean))];
+
+  if (imagePath) {
+    candidates.push(path.isAbsolute(imagePath) ? imagePath : path.join(ROOT, imagePath));
+    candidates.push(path.join(SERVER_DIR, imagePath));
+  }
+
+  for (const folder of QR_IMAGE_SEARCH_DIRS) {
+    candidateNames.forEach((name) => candidates.push(path.join(folder, name)));
+  }
+
+  for (const candidate of candidates) {
+    const normalized = path.normalize(candidate);
+    if (!isPathInAllowedQrFolder(normalized)) continue;
+    try {
+      const stat = await fs.stat(normalized);
+      if (stat.isFile()) return normalized;
+    } catch {
+      // Try the next registered QR folder/name.
+    }
+  }
+
+  throw new Error("QR 이미지 파일이 서버에 없습니다.");
+}
+
+function isPathInAllowedQrFolder(filePath) {
+  return QR_IMAGE_SEARCH_DIRS.some((folder) => {
+    const relative = path.relative(folder, filePath);
+    return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+  });
+}
+
+async function hashFile(filePath) {
+  return hashBuffer(await fs.readFile(filePath));
+}
+
+function hashBuffer(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+async function writeProofArtifact(proof, validation) {
+  await fs.mkdir(PROOF_DIR, { recursive: true });
+  const filePath = path.join(PROOF_DIR, `${proof.id}.json`);
+  await fs.writeFile(filePath, `${JSON.stringify({ proof, validation }, null, 2)}\n`);
+}
+
 async function readState() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   try {
     const raw = await fs.readFile(STATE_FILE, "utf8");
     return normalizeState(JSON.parse(raw));
   } catch {
+    try {
+      const raw = await fs.readFile(LEGACY_STATE_FILE, "utf8");
+      const state = normalizeState(JSON.parse(raw));
+      await writeState(state);
+      return state;
+    } catch {
+      // Fall through to a fresh server state.
+    }
+
     const state = structuredClone(defaultState);
     await writeState(state);
     return state;
@@ -669,10 +872,18 @@ function normalizeQrPayload(value) {
   return String(value || "").trim();
 }
 
-function createVisitProof({ user, landmark, qrCode, scannedValue, points, co2, scannedAt }) {
+function createVisitProof({ user, landmark, qrCode, scannedValue, qrValidation, locationValidation, points, co2, scannedAt }) {
   const hash = crypto
     .createHash("sha256")
-    .update([user, landmark.id, qrCode?.id || "legacy", scannedValue, scannedAt].join("|"))
+    .update([
+      user,
+      landmark.id,
+      qrCode?.id || "legacy",
+      scannedValue,
+      qrValidation?.frameHash || "",
+      locationValidation?.distanceMeters ?? "",
+      scannedAt,
+    ].join("|"))
     .digest("hex");
 
   return {
@@ -685,6 +896,12 @@ function createVisitProof({ user, landmark, qrCode, scannedValue, points, co2, s
     points,
     co2,
     status: "pending-admin-review",
+    qrValidationMode: qrValidation?.mode || "unknown",
+    qrFrameHash: qrValidation?.frameHash || "",
+    storedQrImageHash: qrValidation?.storedImageHash || "",
+    locationMode: locationValidation?.mode || "unknown",
+    distanceMeters: locationValidation?.distanceMeters ?? null,
+    radiusMeters: locationValidation?.radiusMeters ?? null,
     evidenceHash: hash,
   };
 }
@@ -701,6 +918,12 @@ function normalizeVisitProof(proof) {
     points: Number(proof.points) || 0,
     co2: Number(proof.co2) || 0,
     status: String(proof.status || "pending-admin-review"),
+    qrValidationMode: String(proof.qrValidationMode || "unknown"),
+    qrFrameHash: String(proof.qrFrameHash || ""),
+    storedQrImageHash: String(proof.storedQrImageHash || ""),
+    locationMode: String(proof.locationMode || "unknown"),
+    distanceMeters: proof.distanceMeters === null ? null : nullableNumber(proof.distanceMeters),
+    radiusMeters: proof.radiusMeters === null ? null : nullableNumber(proof.radiusMeters),
     evidenceHash: String(proof.evidenceHash || ""),
   };
 }

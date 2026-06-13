@@ -1,6 +1,8 @@
 .DS_Store
 .android-build/
 data/state.json
+server/data/state.json
+server/proofs/*.json
 android/.gradle/
 android/build/
 android/app/build/

@@ -1,4 +1,4 @@
-const CACHE_NAME = "tangamja-bike-carbon-v15";
+const CACHE_NAME = "tangamja-bike-carbon-v16";
 const APP_SHELL = [
   "./",
   "./index.html",

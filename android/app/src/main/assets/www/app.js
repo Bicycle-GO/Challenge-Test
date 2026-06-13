@@ -277,8 +277,10 @@ let qrStream = null;
 let qrDetector = null;
 let qrScanFrame = null;
 let qrCompleting = false;
+let qrServerProbeAt = 0;
 let mapDrag = null;
 let pendingStartSample = null;
+let pendingQrLocation = null;
 
 const screen = document.querySelector("#screenContent");
 const title = document.querySelector("#screenTitle");
@@ -1339,8 +1341,9 @@ document.addEventListener("click", (event) => {
   }
 
   if (target.dataset.action === "simulate-qr-success") {
-    const selected = landmarks[state.selectedLandmark] || landmarks[0];
-    completeQrScan(selected?.qrPayload || "TANGAMJA-DEMO-QR");
+    const status = qrScannerModal?.querySelector("[data-qr-status]");
+    if (status) status.textContent = "서버 이미지 대조 인증은 실제 카메라 프레임과 GPS 좌표가 필요합니다.";
+    showToast("실제 QR을 카메라로 스캔해야 서버 인증이 가능합니다.");
     return;
   }
 
@@ -1656,12 +1659,30 @@ async function scanQr() {
   const selected = landmarks[state.selectedLandmark] || landmarks[0];
   if (!selected) return;
 
-  if (!(state.isNearLandmark || selected.near <= 100)) {
-    showToast("명소 반경 100m 이내에서만 QR 스캔이 가능합니다.");
+  if (!("geolocation" in navigator)) {
+    showToast("이 기기에서는 위치 인증을 사용할 수 없습니다.");
     return;
   }
 
-  openQrScanner(selected);
+  showToast("현장 위치를 확인하고 있습니다.");
+  try {
+    const position = await getCurrentPositionOnce({
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+    pendingQrLocation = createPositionSample(position);
+    state.permissions.location = "granted";
+    state.gpsStatus = pendingQrLocation.accuracy
+      ? `QR 위치 확인 ±${Math.round(pendingQrLocation.accuracy)}m`
+      : "QR 위치 확인 완료";
+    openQrScanner(selected);
+  } catch (error) {
+    state.permissions.location = error.code === 1 ? "denied" : "prompt";
+    state.gpsStatus = positionErrorMessage(error);
+    render();
+    showToast("위치 권한과 GPS 상태를 확인한 뒤 다시 스캔해주세요.");
+  }
 }
 
 async function openQrScanner(selected) {
@@ -1677,7 +1698,7 @@ async function openQrScanner(selected) {
   qrCompleting = false;
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    if (status) status.textContent = "이 브라우저에서는 카메라를 사용할 수 없습니다. 테스트 인증으로 흐름을 확인하세요.";
+    if (status) status.textContent = "이 브라우저에서는 카메라를 사용할 수 없습니다. 서버 인증에는 실제 촬영 프레임이 필요합니다.";
     return;
   }
 
@@ -1698,32 +1719,40 @@ async function openQrScanner(selected) {
     if (status) {
       status.textContent = error?.name === "NotAllowedError"
         ? "카메라 권한이 차단되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요."
-        : "카메라를 시작하지 못했습니다. 테스트 인증으로 흐름을 확인하세요.";
+        : "카메라를 시작하지 못했습니다. 서버 인증에는 실제 촬영 프레임이 필요합니다.";
     }
     showToast("카메라 권한 또는 장치 상태를 확인해주세요.");
   }
 }
 
 async function startQrDetectionLoop(video, status) {
-  if (!("BarcodeDetector" in window)) {
-    if (status) status.textContent = "카메라는 켜졌지만 이 브라우저는 QR 자동 판독을 지원하지 않습니다. 테스트 인증으로 진행할 수 있습니다.";
-    return;
+  qrDetector = null;
+  if ("BarcodeDetector" in window) {
+    try {
+    qrDetector = new BarcodeDetector({ formats: ["qr_code"] });
+    } catch {
+      qrDetector = null;
+    }
   }
 
-  try {
-    qrDetector = new BarcodeDetector({ formats: ["qr_code"] });
-  } catch {
-    if (status) status.textContent = "QR 판독기를 초기화하지 못했습니다. 테스트 인증으로 진행할 수 있습니다.";
-    return;
+  if (!qrDetector && status) {
+    status.textContent = "카메라가 켜졌습니다. 서버가 촬영 프레임에서 QR을 직접 찾고 있습니다.";
   }
 
   const tick = async () => {
     if (qrScannerModal?.hidden || qrCompleting) return;
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       try {
-        const codes = await qrDetector.detect(video);
-        if (codes.length) {
-          await completeQrScan(codes[0].rawValue || "TANGAMJA-QR");
+        let rawValue = "";
+        if (qrDetector) {
+          const codes = await qrDetector.detect(video);
+          rawValue = codes[0]?.rawValue || "";
+        }
+
+        const shouldAskServer = rawValue || Date.now() - qrServerProbeAt > 1200;
+        if (shouldAskServer) {
+          qrServerProbeAt = Date.now();
+          await completeQrScan(rawValue, captureQrFrame(video), { quietRetry: !rawValue });
           return;
         }
       } catch {
@@ -1753,25 +1782,38 @@ function closeQrScanner() {
   }
   qrDetector = null;
   qrCompleting = false;
+  qrServerProbeAt = 0;
+  pendingQrLocation = null;
   qrScannerModal.hidden = true;
   document.body.classList.remove("scanner-open");
 }
 
-async function completeQrScan(rawValue) {
+async function completeQrScan(rawValue, qrFrame, options = {}) {
   if (qrCompleting) return;
   qrCompleting = true;
   const status = qrScannerModal?.querySelector("[data-qr-status]");
-  if (status) status.textContent = "서버에 등록된 현장 QR과 대조하고 있습니다.";
-  await saveQrCheckin(rawValue);
+  if (status) status.textContent = "서버가 촬영 이미지와 현재 위치를 검증하고 있습니다.";
+  await saveQrCheckin(rawValue, qrFrame, options);
 }
 
-async function saveQrCheckin(qrValue) {
+async function saveQrCheckin(qrValue, qrFrame, options = {}) {
   const selected = landmarks[state.selectedLandmark] || landmarks[0];
-  const payload = await mutateServer(
-    "/checkins",
-    {
+  try {
+    const payload = await apiRequest("/checkins", {
+      method: "POST",
+      body: JSON.stringify({
       landmarkIndex: state.selectedLandmark,
       user: currentRiderName(),
+      qrValue,
+      qrFrame,
+      location: pendingQrLocation
+        ? {
+            lat: pendingQrLocation.lat,
+            lng: pendingQrLocation.lng,
+            accuracy: pendingQrLocation.accuracy,
+            timestamp: pendingQrLocation.timestamp,
+          }
+        : null,
       landmark: selected
         ? {
             name: selected.name,
@@ -1780,22 +1822,65 @@ async function saveQrCheckin(qrValue) {
             distance: selected.distance,
             bonus: selected.bonus,
             near: selected.near,
-            qrValue,
           }
         : null,
-    },
-    "QR 체크인이 서버에 저장됐습니다.",
-  );
-
-  if (!payload) {
+      }),
+    });
+    applyServerState(payload.state, payload.activeRide);
+    showToast(payload.message || "QR 이미지와 위치가 서버에서 인증됐습니다.");
+    closeQrScanner();
+    state.isNearLandmark = false;
+    setTab("points");
+  } catch (error) {
+    markServerOffline(error);
     qrCompleting = false;
     const status = qrScannerModal?.querySelector("[data-qr-status]");
-    if (status) status.textContent = "서버 저장에 실패했습니다. 다시 스캔하거나 뒤로가기를 눌러주세요.";
-    return;
+    const quietRetry =
+      options.quietRetry &&
+      /촬영 이미지에서 QR을 직접 판독하지 못했습니다|촬영한 QR 이미지가 서버에 등록된 QR 이미지와 일치하지 않습니다/.test(
+        error.message || "",
+      );
+    if (quietRetry) {
+      if (status) status.textContent = "서버가 QR 이미지를 찾는 중입니다. QR을 화면 중앙에 크게 맞춰주세요.";
+      return;
+    }
+    if (status) status.textContent = error.message || "서버 검증에 실패했습니다. 다시 스캔하거나 뒤로가기를 눌러주세요.";
+    showToast(error.message || "서버 검증에 실패했습니다.");
   }
-  closeQrScanner();
-  state.isNearLandmark = false;
-  setTab("points");
+}
+
+function captureQrFrame(video) {
+  const sourceWidth = video.videoWidth || 0;
+  const sourceHeight = video.videoHeight || 0;
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error("카메라 프레임을 캡처하지 못했습니다.");
+  }
+
+  const scale = Math.min(1, 560 / sourceWidth);
+  const width = Math.max(160, Math.round(sourceWidth * scale));
+  const height = Math.max(160, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(video, 0, 0, width, height);
+  const image = context.getImageData(0, 0, width, height);
+
+  return {
+    width,
+    height,
+    rgbaBase64: bytesToBase64(image.data),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 async function requestExchange() {
