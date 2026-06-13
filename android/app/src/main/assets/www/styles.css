@@ -953,6 +953,11 @@ dd {
   font-weight: 950;
 }
 
+.map-board.api-error .map-api-status {
+  color: #8a3200;
+  background: rgba(255, 244, 230, 0.94);
+}
+
 .map-controls {
   position: absolute;
   top: 10px;

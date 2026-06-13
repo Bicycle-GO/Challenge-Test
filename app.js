@@ -415,15 +415,12 @@ async function hydrateFromServer({ silent = false } = {}) {
       startLocalRideLoop();
       startLocationWatch();
       requestWakeLock();
-      if (!silent) showToast("진행 중인 라이딩을 서버에서 복구했습니다.");
       return;
     }
-    if (!silent) showToast("서버 데이터와 연결되었습니다.");
   } catch (error) {
     state.serverOnline = false;
     render();
     scheduleServerReconnect();
-    if (!silent) showToast(serverConnectionMessage(error));
   }
 }
 
@@ -494,20 +491,8 @@ function scheduleServerReconnect() {
   if (window.TangamjaNativeApi || serverRetryTimer) return;
   serverRetryTimer = window.setTimeout(async () => {
     serverRetryTimer = null;
-    const wasOnline = state.serverOnline;
     await hydrateFromServer({ silent: true });
-    if (!wasOnline && state.serverOnline) {
-      showToast("서버 API에 다시 연결되었습니다.");
-    }
   }, SERVER_RETRY_DELAY);
-}
-
-function serverConnectionMessage(error) {
-  const detail = error?.message ? ` (${error.message})` : "";
-  if (location.protocol === "file:") {
-    return `로컬 서버 연결 대기 중입니다. localhost:4173 서버를 실행하면 자동 연결됩니다.${detail}`;
-  }
-  return `서버 API 연결을 재시도합니다.${detail}`;
 }
 
 function markServerOffline(error) {
@@ -1044,9 +1029,10 @@ function renderVworldMap() {
   const layer = screen.querySelector("[data-vworld-tiles]");
   if (!board || !layer) return;
 
+  board.classList.remove("api-error");
   board.classList.add("api-fallback");
   const status = board.querySelector("[data-map-api-status]");
-  if (status) status.textContent = "V-WORLD WMTS API";
+  if (status) status.textContent = "V-WORLD 타일 연결 중";
   renderVworldTileFallback(board, layer);
   bindInteractiveMap(board);
 }
@@ -1064,6 +1050,23 @@ function renderVworldTileFallback(board, layer) {
   const halfTilesX = Math.ceil(width / tileSize / 2) + 1;
   const halfTilesY = Math.ceil(height / tileSize / 2) + 1;
   const tiles = [];
+  let loadedTiles = 0;
+  let failedTiles = 0;
+  let expectedTiles = 0;
+  const status = board.querySelector("[data-map-api-status]");
+
+  const updateTileStatus = () => {
+    if (!status) return;
+    if (loadedTiles > 0) {
+      status.textContent = `V-WORLD 실시간 지도 · z${zoom}`;
+      board.classList.remove("api-error");
+      return;
+    }
+    if (failedTiles >= expectedTiles) {
+      status.textContent = "V-WORLD 지도 연결 확인 필요";
+      board.classList.add("api-error");
+    }
+  };
 
   for (let x = centerTileX - halfTilesX; x <= centerTileX + halfTilesX; x += 1) {
     for (let y = centerTileY - halfTilesY; y <= centerTileY + halfTilesY; y += 1) {
@@ -1072,10 +1075,28 @@ function renderVworldTileFallback(board, layer) {
       image.alt = "";
       image.decoding = "async";
       image.loading = "lazy";
+      image.referrerPolicy = "no-referrer";
       image.src = vworldTileUrl(x, y, zoom);
+      image.addEventListener(
+        "load",
+        () => {
+          loadedTiles += 1;
+          updateTileStatus();
+        },
+        { once: true },
+      );
+      image.addEventListener(
+        "error",
+        () => {
+          failedTiles += 1;
+          updateTileStatus();
+        },
+        { once: true },
+      );
       image.style.left = `${Math.round(offsetX + (x - centerTileX) * tileSize)}px`;
       image.style.top = `${Math.round(offsetY + (y - centerTileY) * tileSize)}px`;
       tiles.push(image);
+      expectedTiles += 1;
     }
   }
 
@@ -1226,10 +1247,8 @@ function renderServerQrCard(landmark) {
 }
 
 function serverQrImageUrl(landmark) {
-  if (window.TangamjaNativeApi) {
-    return `data/qr-images/${encodeURI(landmark.qrImageFile || `${landmark.qrCodeId}.svg`)}`;
-  }
-  return `${API_BASE}/qr-codes/${encodeURIComponent(landmark.qrCodeId)}/image.svg`;
+  const imageFile = landmark.qrStaticImageFile || landmark.qrImageFile || `${landmark.qrCodeId}.svg`;
+  return `data/qr-images/${encodeURI(imageFile)}`;
 }
 
 function renderPoints() {

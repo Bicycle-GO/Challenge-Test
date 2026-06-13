@@ -14,6 +14,7 @@ const OFFICIAL_LANDMARKS = [
     lat: 35.81213312879267,
     lng: 127.14655632912354,
     qrCodeId: "jeonju-3-1-birthplace",
+    qrStaticImageFile: "jeonju-3-1-birthplace.svg",
     qrImageFile: "전주3.1운동발상지.svg",
     qrPayload: "TANGAMJA:CHECKIN:JEONJU-3-1-MOVEMENT-BIRTHPLACE:v1",
   },
