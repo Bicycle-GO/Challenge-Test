@@ -3,6 +3,8 @@
 data/state.json
 server/data/state.json
 server/proofs/*.json
+server/uploads/
+server/feedback/*.json
 android/.gradle/
 android/build/
 android/app/build/

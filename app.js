@@ -4,6 +4,7 @@ const API_ORIGIN = location.protocol === "file:" ? "http://localhost:4173" : "";
 const API_BASE = `${API_ORIGIN}/api`;
 const RIDER_NAME = "테스트 라이더";
 const SERVER_RETRY_DELAY = 5000;
+const MAX_CLIENT_UPLOAD_BYTES = 6 * 1024 * 1024;
 const VWORLD_API_KEY = "E958994F-358D-38D8-8F2C-9C44597086CF";
 const VWORLD_MAP = {
   center: { lat: 35.72, lng: 127.14 },
@@ -35,6 +36,8 @@ const initialState = {
   wakeStatus: "대기 중",
   activeRide: null,
   liveRides: [],
+  uploads: [],
+  feedbacks: [],
   account: {
     loggedIn: false,
     provider: "guest",
@@ -348,6 +351,7 @@ function bindShellActions() {
     if (action === "request-location") requestLocationPermission();
     if (action === "request-notification") requestNotificationPermission();
     if (action === "send-test-notification") sendTestNotification();
+    if (action === "submit-feedback") submitFeedback();
   });
 
   settingsModal?.querySelectorAll("[data-setting]").forEach((input) => {
@@ -392,6 +396,8 @@ function mergeState(base, saved) {
     map: { ...base.map, ...saved.map, center: { ...base.map.center, ...saved.map?.center } },
     activeRide: saved.activeRide || base.activeRide,
     liveRides: saved.liveRides || base.liveRides,
+    uploads: saved.uploads || base.uploads,
+    feedbacks: saved.feedbacks || base.feedbacks,
     badges: { ...base.badges, ...saved.badges },
     history: saved.history || base.history,
     requests: saved.requests || base.requests,
@@ -570,6 +576,7 @@ function renderSettings() {
   const locationText = settingsModal.querySelector("[data-location-permission]");
   const notificationText = settingsModal.querySelector("[data-notification-permission]");
   const permissionSummary = settingsModal.querySelector("[data-permission-summary]");
+  const feedbackSummary = settingsModal.querySelector("[data-feedback-summary]");
 
   if (accountName) accountName.textContent = state.account.name || "게스트 라이더";
   if (accountCopy) {
@@ -584,6 +591,10 @@ function renderSettings() {
   if (locationText) locationText.textContent = permissionLabel("location", state.permissions.location);
   if (notificationText) notificationText.textContent = permissionLabel("notifications", state.permissions.notifications);
   if (permissionSummary) permissionSummary.textContent = permissionSummaryText();
+  if (feedbackSummary) {
+    const activeCount = state.feedbacks.filter((item) => item.status === "pending" || item.status === "in-review").length;
+    feedbackSummary.textContent = activeCount ? `${activeCount}건 처리 중` : "등록 가능";
+  }
 
   settingsModal.querySelectorAll("[data-setting]").forEach((input) => {
     input.checked = Boolean(state.settings[input.dataset.setting]);
@@ -602,6 +613,25 @@ function providerLabel(provider) {
     strava: "Strava",
     guest: "게스트",
   }[provider] || provider;
+}
+
+function feedbackCategoryLabel(category) {
+  return {
+    opinion: "의견",
+    improvement: "개선사항",
+    bug: "오류 제보",
+    upload: "자료 업로드",
+    other: "기타",
+  }[category] || "의견";
+}
+
+function feedbackStatusLabel(status) {
+  return {
+    pending: "대기",
+    "in-review": "검토 중",
+    resolved: "완료",
+    archived: "보관",
+  }[status] || "대기";
 }
 
 function permissionLabel(type, value) {
@@ -711,6 +741,93 @@ async function syncAccountToServer(fallbackMessage) {
   } catch {
     showToast(`${fallbackMessage} 서버 동기화는 나중에 다시 시도합니다.`);
   }
+}
+
+async function submitFeedback() {
+  const categoryInput = settingsModal.querySelector("[data-feedback-category]");
+  const titleInput = settingsModal.querySelector("[data-feedback-title]");
+  const messageInput = settingsModal.querySelector("[data-feedback-message]");
+  const fileInput = settingsModal.querySelector("[data-feedback-file]");
+  const submitButton = settingsModal.querySelector("[data-action='submit-feedback']");
+  const file = fileInput?.files?.[0] || null;
+  const category = categoryInput?.value || "opinion";
+  const fallbackTitle = file ? file.name : "";
+  const title = titleInput?.value.trim() || fallbackTitle;
+  const message = messageInput?.value.trim() || (file ? "첨부 자료 확인 요청" : "");
+
+  if (!title && !message) {
+    showToast("등록할 제목 또는 내용을 입력해주세요.");
+    return;
+  }
+
+  if (file && file.size > MAX_CLIENT_UPLOAD_BYTES) {
+    showToast("첨부 자료는 6MB 이하만 등록할 수 있습니다.");
+    return;
+  }
+
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const uploadIds = [];
+    if (file) {
+      const uploadPayload = await uploadFeedbackFile(file, title || feedbackCategoryLabel(category));
+      if (!uploadPayload) return;
+      uploadIds.push(uploadPayload.upload.id);
+    }
+
+    const payload = await apiRequest("/feedback", {
+      method: "POST",
+      body: JSON.stringify({
+        feedback: {
+          category,
+          title,
+          message,
+          user: currentRiderName(),
+          email: state.account.email,
+          uploadIds,
+        },
+      }),
+    });
+
+    applyServerState(payload.state);
+    if (titleInput) titleInput.value = "";
+    if (messageInput) messageInput.value = "";
+    if (fileInput) fileInput.value = "";
+    renderSettings();
+    showToast(payload.message || "의견이 서버에 등록됐습니다.");
+  } catch (error) {
+    markServerOffline(error);
+    showToast(error.message || "의견 등록 중 오류가 발생했습니다.");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function uploadFeedbackFile(file, purpose) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const payload = await apiRequest("/uploads", {
+    method: "POST",
+    body: JSON.stringify({
+      user: currentRiderName(),
+      purpose,
+      file: {
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl,
+      },
+    }),
+  });
+  applyServerState(payload.state);
+  return payload;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")), { once: true });
+    reader.addEventListener("error", () => reject(new Error("첨부 자료를 읽지 못했습니다.")), { once: true });
+    reader.readAsDataURL(file);
+  });
 }
 
 function requestLocationPermission() {
@@ -1389,32 +1506,95 @@ function renderPoints() {
 
 function renderAdmin() {
   const pending = state.requests.filter((request) => request.status === "pending");
+  const activeFeedbacks = state.feedbacks.filter((feedback) => feedback.status === "pending" || feedback.status === "in-review");
   screen.querySelector("[data-admin-users]").textContent = formatNumber(state.stats.users);
   screen.querySelector("[data-admin-rides]").textContent = formatNumber(state.stats.rides);
   screen.querySelector("[data-admin-pending]").textContent = pending.length;
+  screen.querySelector("[data-admin-feedbacks]").textContent = activeFeedbacks.length;
 
   const list = screen.querySelector("[data-admin-list]");
-  if (!pending.length) {
+  if (!pending.length && !activeFeedbacks.length) {
     list.innerHTML = `<div class="empty-state">승인 대기 건이 없습니다.</div>`;
     return;
   }
 
-  list.replaceChildren(
-    ...pending.map((request) => {
+  const requestCards = pending.map((request) => {
       const element = document.createElement("article");
       element.className = "admin-request";
       element.innerHTML = `
-        <h3>${request.title}</h3>
-        <p>${request.user} · ${request.distance.toFixed(2)}km · ${request.co2.toFixed(2)}kgCO2e · ${request.points}P</p>
-        <p>${request.evidence}</p>
+        <h3>${escapeHtml(request.title)}</h3>
+        <p>${escapeHtml(request.user)} · ${Number(request.distance || 0).toFixed(2)}km · ${Number(request.co2 || 0).toFixed(2)}kgCO2e · ${formatNumber(request.points || 0)}P</p>
+        <p>${escapeHtml(request.evidence)}</p>
         <div class="request-actions">
           <button class="approve" type="button" data-approve="${request.id}">승인</button>
           <button class="reject" type="button" data-reject="${request.id}">반려</button>
         </div>
       `;
       return element;
-    }),
-  );
+    });
+
+  const feedbackCards = activeFeedbacks.map((feedback) => {
+    const uploads = feedbackUploads(feedback);
+    const element = document.createElement("article");
+    element.className = "admin-request feedback-request";
+    element.innerHTML = `
+      <div class="admin-request-top">
+        <span>${feedbackCategoryLabel(feedback.category)}</span>
+        <span>${feedbackStatusLabel(feedback.status)}</span>
+      </div>
+      <h3>${escapeHtml(feedback.title)}</h3>
+      <p>${escapeHtml(feedback.user)} · ${formatDate(feedback.createdAt)} · 첨부 ${uploads.length}개</p>
+      <p>${escapeHtml(feedback.message)}</p>
+      ${uploads.length ? `<div class="upload-chip-row">${uploads.map(uploadChip).join("")}</div>` : ""}
+      <div class="request-actions feedback-actions">
+        <button class="secondary-action" type="button" data-feedback-id="${feedback.id}" data-feedback-next="in-review">검토중</button>
+        <button class="approve" type="button" data-feedback-id="${feedback.id}" data-feedback-next="resolved">완료</button>
+        <button class="reject" type="button" data-feedback-id="${feedback.id}" data-feedback-next="archived">보관</button>
+      </div>
+    `;
+    return element;
+  });
+
+  list.replaceChildren(...requestCards, ...feedbackCards);
+}
+
+function feedbackUploads(feedback) {
+  const uploadIds = Array.isArray(feedback.uploadIds) ? feedback.uploadIds : [];
+  return uploadIds.map((id) => state.uploads.find((upload) => upload.id === id)).filter(Boolean);
+}
+
+function uploadChip(upload) {
+  return `
+    <a href="${escapeAttribute(upload.url || "#")}" target="_blank" rel="noopener">
+      ${escapeHtml(upload.originalName || "첨부 자료")} · ${formatFileSize(upload.size)}
+    </a>
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "날짜 없음";
+  return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)}MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)}KB`;
+  return `${size}B`;
 }
 
 document.addEventListener("click", (event) => {
@@ -1501,6 +1681,11 @@ document.addEventListener("click", (event) => {
 
   if (target.dataset.reject) {
     reviewRequest(target.dataset.reject, "rejected");
+    return;
+  }
+
+  if (target.dataset.feedbackId && target.dataset.feedbackNext) {
+    reviewFeedback(target.dataset.feedbackId, target.dataset.feedbackNext);
   }
 });
 
@@ -2030,6 +2215,20 @@ async function reviewRequest(id, status) {
   } catch (error) {
     markServerOffline(error);
     showToast(error.message || "검증 처리 중 오류가 발생했습니다.");
+  }
+}
+
+async function reviewFeedback(id, status) {
+  try {
+    const payload = await apiRequest(`/feedback/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    applyServerState(payload.state);
+    showToast(payload.message || "의견 상태를 변경했습니다.");
+  } catch (error) {
+    markServerOffline(error);
+    showToast(error.message || "의견 처리 중 오류가 발생했습니다.");
   }
 }
 

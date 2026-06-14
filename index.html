@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f5bd8" />
     <title>탄감자 자전거 챌린지</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=vworld-layer-select-1" />
+    <link rel="stylesheet" href="styles.css?v=server-feedback-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -183,6 +183,38 @@
             <button class="strava-action" type="button" data-action="strava-login">Strava로 연결</button>
             <button class="secondary-action" type="button" data-action="logout">로그아웃</button>
           </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title">
+            <h3>자료와 의견</h3>
+            <span data-feedback-summary>등록 가능</span>
+          </div>
+          <div class="feedback-form">
+            <label>
+              구분
+              <select data-feedback-category>
+                <option value="opinion">의견</option>
+                <option value="improvement">개선사항</option>
+                <option value="bug">오류 제보</option>
+                <option value="upload">자료 업로드</option>
+                <option value="other">기타</option>
+              </select>
+            </label>
+            <label>
+              제목
+              <input type="text" data-feedback-title placeholder="제목" maxlength="120" />
+            </label>
+            <label class="feedback-message-field">
+              내용
+              <textarea data-feedback-message placeholder="내용" maxlength="2000"></textarea>
+            </label>
+            <label class="feedback-file-field">
+              첨부
+              <input type="file" data-feedback-file />
+            </label>
+          </div>
+          <button class="primary-action" type="button" data-action="submit-feedback">서버에 등록</button>
         </section>
 
         <section class="settings-section">
@@ -464,10 +496,11 @@
         <article><span data-admin-users></span><small>참여자</small></article>
         <article><span data-admin-rides></span><small>주행 기록</small></article>
         <article><span data-admin-pending></span><small>승인 대기</small></article>
+        <article><span data-admin-feedbacks></span><small>개선사항</small></article>
       </section>
       <section class="admin-list" data-admin-list></section>
     </template>
-    <script src="landmark-data.js?v=vworld-layer-select-1"></script>
-    <script src="app.js?v=vworld-layer-select-1" type="module"></script>
+    <script src="landmark-data.js?v=server-feedback-1"></script>
+    <script src="app.js?v=server-feedback-1" type="module"></script>
   </body>
 </html>

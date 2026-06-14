@@ -11,8 +11,8 @@ node server.js
 
 브라우저에서 `http://localhost:4173`을 열면 됩니다.
 
-서버 운영 데이터의 기본 저장소는 `/Users/yangjimin/Documents/server/Challenge-test-server`입니다. 서버 상태는
-`/Users/yangjimin/Documents/server/Challenge-test-server/data/state.json`에 저장되며, 이 파일은 Git에 포함하지 않습니다.
+서버 운영 데이터의 기본 저장소는 `/Users/yangjimin/Documents/Server/Challenge-Test-Server`입니다. 서버 상태는
+`/Users/yangjimin/Documents/Server/Challenge-Test-Server/data/state.json`에 저장되며, 이 파일은 Git에 포함하지 않습니다.
 이전 버전의 프로젝트 내부 `server/data/state.json` 또는 `data/state.json`이 있으면 최초 실행 시
 외부 서버 저장소로 자동 복사합니다.
 
@@ -38,6 +38,9 @@ node server.js
 - `POST /api/rides/:id/finish`: 라이딩 종료, 탄소포인트 등록, 관리자 검증 요청 생성
 - `POST /api/checkins`: 명소 QR 체크인 저장
 - `POST /api/exchanges`: 포인트 전환 신청
+- `POST /api/uploads`: 첨부 자료를 외부 서버 저장소 `uploads/`에 저장
+- `POST /api/feedback`: 의견, 개선사항, 오류 제보를 서버에 등록
+- `PATCH /api/feedback/:id`: 등록된 의견의 처리 상태 변경
 - `PATCH /api/requests/:id`: 관리자 승인 또는 반려
 - `POST /api/reset`: 테스트 상태 초기화
 
@@ -59,14 +62,16 @@ Android Foreground Service 또는 iOS CoreLocation background mode가 포함된
 QR 인증은 앱이 읽은 문자열만 믿지 않고, 앱이 촬영한 카메라 프레임 픽셀과 현재 GPS
 좌표를 서버로 보내면 서버가 직접 판정합니다.
 
-- `/Users/yangjimin/Documents/server/Challenge-test-server/qr-images`: 현장 게시용 QR 이미지 원본 저장소
-- `/Users/yangjimin/Documents/server/Challenge-test-server/data/state.json`: 계정, 포인트, 체크인, 검증 요청 등 운영 상태 저장
-- `/Users/yangjimin/Documents/server/Challenge-test-server/proofs`: 인증 성공 시 QR 프레임 해시, 서버 QR 이미지 해시, GPS 거리 등 증거 JSON 저장
-- `/Users/yangjimin/Documents/server/Challenge-test-server/vendor/jsQR.js`: 서버가 촬영 프레임에서 QR을 직접 판독하기 위한 로컬 디코더
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/qr-images`: 현장 게시용 QR 이미지 원본 저장소
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/data/state.json`: 계정, 포인트, 체크인, 검증 요청, 업로드 메타데이터, 의견 처리 상태 저장
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/uploads`: 사용자가 등록한 첨부 자료 저장
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/feedback`: 의견·개선사항 개별 JSON 저장
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/proofs`: 인증 성공 시 QR 프레임 해시, 서버 QR 이미지 해시, GPS 거리 등 증거 JSON 저장
+- `/Users/yangjimin/Documents/Server/Challenge-Test-Server/vendor/jsQR.js`: 서버가 촬영 프레임에서 QR을 직접 판독하기 위한 로컬 디코더
 
-QR 이미지 경로는 `/Users/yangjimin/Documents/server/Challenge-test-server/data/state.json`의 `qrCodes[].imagePath`에
+QR 이미지 경로는 `/Users/yangjimin/Documents/Server/Challenge-Test-Server/data/state.json`의 `qrCodes[].imagePath`에
 등록합니다. 서버는 등록 경로를 먼저 확인하고, 파일명이 맞으면
-`/Users/yangjimin/Documents/server/Challenge-test-server/qr-images`, 프로젝트 내부 `server/qr-images`, 기존 호환 폴더인
+`/Users/yangjimin/Documents/Server/Challenge-Test-Server/qr-images`, 프로젝트 내부 `server/qr-images`, 기존 호환 폴더인
 `data/qr-images`에서도 자동 탐색합니다. 보안상 컴퓨터 전체를 무제한 검색하지는 않습니다.
 
 ## 배지와 보물 시스템

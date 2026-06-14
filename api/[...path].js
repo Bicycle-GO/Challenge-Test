@@ -49,6 +49,8 @@ const defaultState = {
   liveRides: [],
   qrCodes: defaultQrCodes,
   visitProofs: [],
+  uploads: [],
+  feedbacks: [],
   history: [
     {
       title: "전주 한옥마을 QR 체크인",
@@ -130,6 +132,12 @@ module.exports = async function handler(request, response) {
       return;
     }
 
+    const uploadFileMatch = route.match(/^\/api\/uploads\/([^/]+)\/file$/);
+    if (request.method === "GET" && uploadFileMatch) {
+      sendJson(response, 410, { error: "미리보기 API는 업로드 파일 다운로드를 지원하지 않습니다." });
+      return;
+    }
+
     if (request.method === "POST" && route === "/api/account") {
       await saveAccount(response, await readJsonBody(request));
       return;
@@ -168,6 +176,16 @@ module.exports = async function handler(request, response) {
       return;
     }
 
+    if (request.method === "POST" && route === "/api/uploads") {
+      await saveUpload(response, await readJsonBody(request));
+      return;
+    }
+
+    if (request.method === "POST" && route === "/api/feedback") {
+      await saveFeedback(response, await readJsonBody(request));
+      return;
+    }
+
     if (request.method === "POST" && route === "/api/exchanges") {
       const amount = Math.min(5000, Math.floor(stateStore.stats.totalPoints / 100) * 100);
       if (amount <= 0) {
@@ -201,6 +219,12 @@ module.exports = async function handler(request, response) {
       return;
     }
 
+    const feedbackMatch = route.match(/^\/api\/feedback\/([^/]+)$/);
+    if (request.method === "PATCH" && feedbackMatch) {
+      await reviewFeedback(response, decodeURIComponent(feedbackMatch[1]), await readJsonBody(request));
+      return;
+    }
+
     if (request.method === "POST" && route === "/api/reset") {
       Object.assign(stateStore, clone(defaultState));
       sendJson(response, 200, { message: "서버 상태를 초기화했습니다.", state: normalizeState(stateStore) });
@@ -229,6 +253,62 @@ function saveAccount(response, body) {
     state: normalizeState(stateStore),
     account,
   });
+}
+
+function saveUpload(response, body) {
+  if (!Array.isArray(stateStore.uploads)) stateStore.uploads = [];
+  const file = body.file || body.upload || {};
+  const id = `UP-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+  const upload = {
+    id,
+    user: String(body.user || "테스트 라이더").slice(0, 80),
+    purpose: String(body.purpose || "feedback").slice(0, 40),
+    originalName: sanitizeFileName(file.name || "uploaded-material.bin"),
+    storedName: `${id}-${sanitizeFileName(file.name || "uploaded-material.bin")}`,
+    mimeType: String(file.type || "application/octet-stream").slice(0, 120),
+    size: Math.max(0, Math.round(Number(file.size) || estimateBase64Size(file.dataUrl || file.base64))),
+    status: "stored",
+    filePath: `memory/${id}`,
+    url: `/api/uploads/${encodeURIComponent(id)}/file`,
+    createdAt: new Date().toISOString(),
+  };
+
+  stateStore.uploads.unshift(upload);
+  stateStore.uploads = stateStore.uploads.slice(0, 200);
+  sendJson(response, 201, { message: "자료 업로드 메타데이터가 미리보기 서버에 등록됐습니다.", state: normalizeState(stateStore), upload: publicUpload(upload) });
+}
+
+function saveFeedback(response, body) {
+  if (!Array.isArray(stateStore.feedbacks)) stateStore.feedbacks = [];
+  if (!Array.isArray(stateStore.uploads)) stateStore.uploads = [];
+  const input = body.feedback || body;
+  const title = String(input.title || "").trim().slice(0, 120);
+  const message = String(input.message || input.body || "").trim().slice(0, 2000);
+  if (!title && !message) {
+    sendJson(response, 400, { error: "제목 또는 의견 내용을 입력해주세요." });
+    return;
+  }
+
+  const uploadIds = Array.isArray(input.uploadIds)
+    ? input.uploadIds.map((id) => String(id)).filter((id) => stateStore.uploads.some((upload) => upload.id === id)).slice(0, 10)
+    : [];
+  const feedback = {
+    id: `FB-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    category: normalizeFeedbackCategory(input.category),
+    priority: ["low", "normal", "high"].includes(String(input.priority || "")) ? String(input.priority) : "normal",
+    title: title || "의견",
+    message: message || "첨부 자료 확인 요청",
+    user: String(input.user || "테스트 라이더").trim().slice(0, 80),
+    email: String(input.email || "").trim().slice(0, 120),
+    uploadIds,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  stateStore.feedbacks.unshift(feedback);
+  stateStore.feedbacks = stateStore.feedbacks.slice(0, 200);
+  sendJson(response, 201, { message: "의견과 개선사항이 미리보기 서버에 등록됐습니다.", state: normalizeState(stateStore), feedback });
 }
 
 function startRideSession(response, body) {
@@ -447,6 +527,26 @@ function reviewRequest(response, id, body) {
   });
 }
 
+function reviewFeedback(response, id, body) {
+  if (!Array.isArray(stateStore.feedbacks)) stateStore.feedbacks = [];
+  const status = String(body.status || "");
+  if (!["pending", "in-review", "resolved", "archived"].includes(status)) {
+    sendJson(response, 400, { error: "처리 상태는 pending, in-review, resolved, archived 중 하나여야 합니다." });
+    return;
+  }
+
+  const feedback = stateStore.feedbacks.find((item) => item.id === id);
+  if (!feedback) {
+    sendJson(response, 404, { error: "등록된 의견을 찾을 수 없습니다." });
+    return;
+  }
+
+  feedback.status = status;
+  feedback.updatedAt = new Date().toISOString();
+  if (status === "resolved" || status === "archived") feedback.reviewedAt = feedback.updatedAt;
+  sendJson(response, 200, { message: "의견 상태를 변경했습니다.", state: normalizeState(stateStore), feedback });
+}
+
 function validateQrCapture(qrCode, body) {
   if (!qrCode) return { ok: false, error: "등록된 서버 QR을 찾지 못했습니다." };
 
@@ -589,6 +689,78 @@ function publicQrCode(qrCode) {
   };
 }
 
+function normalizeUpload(upload) {
+  if (!upload || typeof upload !== "object" || !upload.id) return null;
+  return {
+    id: String(upload.id),
+    user: String(upload.user || "테스트 라이더").slice(0, 80),
+    purpose: String(upload.purpose || "feedback").slice(0, 40),
+    originalName: sanitizeFileName(upload.originalName || upload.name || "uploaded-material.bin"),
+    storedName: sanitizeFileName(upload.storedName || upload.originalName || upload.id),
+    mimeType: String(upload.mimeType || "application/octet-stream").slice(0, 120),
+    size: Math.max(0, Math.round(Number(upload.size) || 0)),
+    status: upload.status === "deleted" ? "deleted" : "stored",
+    filePath: String(upload.filePath || ""),
+    url: upload.url || `/api/uploads/${encodeURIComponent(upload.id)}/file`,
+    createdAt: String(upload.createdAt || new Date().toISOString()),
+  };
+}
+
+function publicUpload(upload) {
+  return {
+    id: upload.id,
+    originalName: upload.originalName,
+    mimeType: upload.mimeType,
+    size: upload.size,
+    status: upload.status,
+    url: upload.url,
+    createdAt: upload.createdAt,
+  };
+}
+
+function normalizeFeedback(feedback) {
+  if (!feedback || typeof feedback !== "object" || !feedback.id) return null;
+  const status = ["pending", "in-review", "resolved", "archived"].includes(String(feedback.status))
+    ? String(feedback.status)
+    : "pending";
+  const normalized = {
+    id: String(feedback.id),
+    category: normalizeFeedbackCategory(feedback.category),
+    priority: ["low", "normal", "high"].includes(String(feedback.priority)) ? String(feedback.priority) : "normal",
+    title: String(feedback.title || "의견").trim().slice(0, 120),
+    message: String(feedback.message || "").trim().slice(0, 2000),
+    user: String(feedback.user || "테스트 라이더").trim().slice(0, 80),
+    email: String(feedback.email || "").trim().slice(0, 120),
+    uploadIds: Array.isArray(feedback.uploadIds) ? feedback.uploadIds.map((id) => String(id)).slice(0, 10) : [],
+    status,
+    createdAt: String(feedback.createdAt || new Date().toISOString()),
+    updatedAt: String(feedback.updatedAt || feedback.createdAt || new Date().toISOString()),
+  };
+  if (feedback.reviewedAt) normalized.reviewedAt = String(feedback.reviewedAt);
+  return normalized;
+}
+
+function normalizeFeedbackCategory(category) {
+  const value = String(category || "").toLowerCase();
+  return ["opinion", "improvement", "bug", "upload", "other"].includes(value) ? value : "opinion";
+}
+
+function sanitizeFileName(value) {
+  const filename = path.basename(String(value || "uploaded-material.bin")).normalize("NFC");
+  const sanitized = filename
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return sanitized && sanitized !== "." && sanitized !== ".." ? sanitized : "uploaded-material.bin";
+}
+
+function estimateBase64Size(value) {
+  const text = String(value || "");
+  const base64 = text.includes(",") ? text.slice(text.indexOf(",") + 1) : text;
+  return Math.max(0, Math.floor((base64.replace(/=+$/, "").length * 3) / 4));
+}
+
 function normalizeState(state) {
   return {
     account: normalizeAccount(state.account),
@@ -608,6 +780,8 @@ function normalizeState(state) {
     liveRides: Array.isArray(state.liveRides) ? state.liveRides : [],
     qrCodes: Array.isArray(state.qrCodes) ? state.qrCodes : clone(defaultQrCodes),
     visitProofs: Array.isArray(state.visitProofs) ? state.visitProofs.slice(0, 100) : [],
+    uploads: Array.isArray(state.uploads) ? state.uploads.map(normalizeUpload).filter(Boolean).slice(0, 200) : [],
+    feedbacks: Array.isArray(state.feedbacks) ? state.feedbacks.map(normalizeFeedback).filter(Boolean).slice(0, 200) : [],
     history: Array.isArray(state.history) ? state.history : [...defaultState.history],
     requests: Array.isArray(state.requests) ? state.requests : [...defaultState.requests],
   };
@@ -689,6 +863,8 @@ function trimCollections(state) {
   state.history = state.history.slice(0, 60);
   state.requests = state.requests.slice(0, 60);
   state.visitProofs = state.visitProofs.slice(0, 100);
+  state.uploads = Array.isArray(state.uploads) ? state.uploads.slice(0, 200) : [];
+  state.feedbacks = Array.isArray(state.feedbacks) ? state.feedbacks.slice(0, 200) : [];
 }
 
 function addUnique(list, value) {

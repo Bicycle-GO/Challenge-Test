@@ -36,7 +36,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -149,6 +150,9 @@ button {
 .qr-scanner-actions button:focus-visible,
 .map-controls button:focus-visible,
 .toggle-row input:focus-visible,
+.feedback-form input:focus-visible,
+.feedback-form select:focus-visible,
+.feedback-form textarea:focus-visible,
 .quick-card:focus-visible,
 .map-pin:focus-visible,
 .bike-position:focus-visible {
@@ -1414,7 +1418,7 @@ dd {
 
 .admin-metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -1461,10 +1465,56 @@ dd {
   line-height: 1.45;
 }
 
+.admin-request-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.admin-request-top span {
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 99px;
+  color: var(--blue-deep);
+  background: #eef5ff;
+  font-size: 0.7rem;
+  font-weight: 950;
+}
+
+.feedback-request {
+  border-color: #d9eadf;
+  background: #fbfffc;
+}
+
+.upload-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.upload-chip-row a {
+  max-width: 100%;
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+  border-radius: 99px;
+  color: var(--green);
+  background: var(--green-soft);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
 .request-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.feedback-actions {
+  grid-template-columns: 1fr 1fr 1fr;
 }
 
 .request-actions button {
@@ -1656,6 +1706,65 @@ body.settings-open {
 }
 
 .login-form input:focus {
+  border-color: var(--blue);
+  outline: 3px solid rgba(15, 91, 216, 0.16);
+}
+
+.feedback-form {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 8px;
+}
+
+.feedback-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.feedback-message-field,
+.feedback-file-field {
+  grid-column: 1 / -1;
+}
+
+.feedback-form input,
+.feedback-form select,
+.feedback-form textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #c8d9ef;
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: white;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.feedback-form input,
+.feedback-form select {
+  height: 42px;
+  padding: 0 11px;
+}
+
+.feedback-form textarea {
+  min-height: 96px;
+  padding: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.feedback-form input[type="file"] {
+  height: auto;
+  padding: 10px;
+  font-size: 0.78rem;
+}
+
+.feedback-form input:focus,
+.feedback-form select:focus,
+.feedback-form textarea:focus {
   border-color: var(--blue);
   outline: 3px solid rgba(15, 91, 216, 0.16);
 }
@@ -2216,9 +2325,14 @@ body.scanner-open {
   }
 
   .login-form,
+  .feedback-form,
   .settings-actions,
   .permission-grid article {
     grid-template-columns: 1fr;
+  }
+
+  .admin-metrics {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .settings-actions .secondary-action,
